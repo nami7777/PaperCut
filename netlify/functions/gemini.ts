@@ -10,16 +10,21 @@ export const handler: Handler = async (event) => {
   if (!prompt) return { statusCode: 400, body: 'Missing prompt' };
 
   try {
+    const instruction = `Extract single or double or triple word concepts that best describe the academic topic tested in the question.
+Return only the words, comma-separated, no bullets, no sentences, no extra text.
+Question: ${prompt}`;
+
     const response = await genAI.models.generateContent({
       model: 'gemini-2.5-flash-lite',
-      contents: prompt,
+      contents: instruction,
     });
 
-    const text = response.text; // already a string
+    const text = response.text as string;
     const keywords = text
       .split(/[,\n]/)
-      .map((w: string) => w.trim())
-      .filter(Boolean);
+      .map((w) => w.trim())
+      .filter(Boolean)
+      .slice(0, 3); // enforce hard limit
 
     return {
       statusCode: 200,
