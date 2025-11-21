@@ -1,0 +1,5 @@
+{
+  "name": "PaperCut - Past Paper Extractor",
+  "description": "An offline-capable tool to extract and organize questions from PDF past papers and answer keys.",
+  "requestFramePermissions": []
+}

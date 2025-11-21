@@ -1,0 +1,19 @@
+{
+	"geolocation": {
+		"data": {
+			"city": "Dubai",
+			"country": {
+				"code": "AE",
+				"name": "United Arab Emirates"
+			},
+			"subdivision": {
+				"code": "DU",
+				"name": "Dubai"
+			},
+			"timezone": "Asia/Dubai",
+			"latitude": 25.0734,
+			"longitude": 55.2979
+		},
+		"timestamp": 1763741614854
+	}
+}

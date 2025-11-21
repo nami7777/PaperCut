@@ -1,0 +1,6 @@
+[dev]
+  command = "npm run dev"
+  targetPort = 3000          # vite port
+  port = 8888                # netlify dev port
+  autoLaunch = true
+  functions = "netlify/functions"   # <-- key line
