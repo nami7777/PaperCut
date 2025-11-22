@@ -201,8 +201,6 @@ const SubjectDashboard: React.FC = () => {
                                 <h3 className="font-bold text-lg truncate">{q.year} {q.month} - {q.paperType}</h3>
                                 <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                                     <span>Q{q.questionNumber}</span>
-                                    <span>•</span>
-                                    <span>{q.difficulty}</span>
                                 </div>
                             </div>
                             <button onClick={(e) => handleDeleteQ(e, q.id)} className="text-slate-400 hover:text-red-500 p-2"><Trash2 size={18}/></button>

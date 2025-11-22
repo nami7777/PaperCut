@@ -42,7 +42,6 @@ export interface QuestionEntry {
   createdAt: number;
   keywords: string[];
   topics: string[]; // Optional topic tag
-  difficulty?: string; // Intrinsic difficulty
   ocrText?: string; // Extracted text from question images for search
   
   // Study Mode Data

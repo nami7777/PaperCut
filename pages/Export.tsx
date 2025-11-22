@@ -148,7 +148,7 @@ const Export: React.FC = () => {
                         new Paragraph({
                             children: [
                                 new TextRun({
-                                    text: `Q${q.questionNumber} • Difficulty: ${q.difficulty || 'Medium'}`,
+                                    text: `Q${q.questionNumber}`,
                                     bold: true,
                                     color: "2C3E50"
                                 })
@@ -377,7 +377,7 @@ const Export: React.FC = () => {
                     doc.setFontSize(10);
                     doc.setTextColor(0, 0, 0);
                     
-                    const title = `Q${q.questionNumber} (${q.difficulty || 'Medium'})`;
+                    const title = `Q${q.questionNumber}`;
                     checkPageBreak(10);
                     doc.text(title, margin, y);
                     y += 5;

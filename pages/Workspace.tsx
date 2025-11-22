@@ -5,34 +5,7 @@ import { ExamMetadata, PaperType, QuestionPart, QuestionEntry } from '../types';
 import PdfSnipper from '../components/PdfSnipper';
 import { Save, Plus, Trash2, ChevronLeft, Layers, FileQuestion, AlertCircle, Loader2, LogOut, Minus, Anchor, X, ScanText, Sparkles, Wand2 } from 'lucide-react';
 import { saveQuestion, getAllUniqueKeywords, getAllUniqueTopics, getFewShotExamples } from '../services/db';
-
-
-/*  NETLIFY FUNCTION PROXY  */
-async function generateAiKeywords(
-  text: string,
-  _subject: string,        // kept for signature compatibility
-  _examples?: any[]
-): Promise<string[]> {
-  if (!text.trim()) return [];
-
-  try {
-    const res = await fetch('/.netlify/functions/gemini', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: text }),
-    });
-
-    if (!res.ok) {
-      console.error('Gemini proxy error', res.status, await res.text());
-      return [];
-    }
-    const { keywords } = await res.json();
-    return keywords ?? [];
-  } catch (e) {
-    console.error('Network / AI error', e);
-    return [];
-  }
-}
+import { generateAiKeywords } from '../services/gemini';
 
 declare global {
     interface Window {
@@ -52,7 +25,6 @@ const Workspace: React.FC = () => {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [currentKeyword, setCurrentKeyword] = useState("");
   const [topic, setTopic] = useState("");
-  const [difficulty, setDifficulty] = useState("Medium");
   const [isSaving, setIsSaving] = useState(false);
   
   // Sticky State
@@ -283,7 +255,6 @@ const Workspace: React.FC = () => {
       createdAt: Date.now(),
       keywords,
       topics: topic ? [topic] : [],
-      difficulty,
       year: metadata.year,
       month: metadata.month,
       subject: metadata.subject,
@@ -307,7 +278,6 @@ const Workspace: React.FC = () => {
       if (!stickyMetadata) {
           setKeywords([]);
           setTopic("");
-          setDifficulty("Medium");
       }
 
       // Reset Images & OCR
@@ -374,32 +344,18 @@ const Workspace: React.FC = () => {
                     </label>
                 </div>
 
-                {/* Number & Diff */}
-                <div className="flex gap-2">
-                    <div className="flex-1">
-                        <label className="block text-xs font-medium text-slate-400 mb-1">Q #</label>
-                        <div className="flex items-center gap-1">
-                            <button onClick={() => changeQuestionNum(-1)} className="p-2 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700"><Minus size={14} /></button>
-                            <input 
-                            type="text" 
-                            value={questionNum}
-                            onChange={(e) => setQuestionNum(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-center font-mono"
-                            />
-                            <button onClick={() => changeQuestionNum(1)} className="p-2 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700"><Plus size={14} /></button>
-                        </div>
-                    </div>
-                    <div className="flex-1">
-                        <label className="block text-xs font-medium text-slate-400 mb-1">Difficulty</label>
-                        <select
-                            value={difficulty}
-                            onChange={(e) => setDifficulty(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm"
-                        >
-                            <option value="Easy">Easy</option>
-                            <option value="Medium">Medium</option>
-                            <option value="Hard">Hard</option>
-                        </select>
+                {/* Number Control */}
+                <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Question Number</label>
+                    <div className="flex items-center gap-1">
+                        <button onClick={() => changeQuestionNum(-1)} className="p-2 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700"><Minus size={14} /></button>
+                        <input 
+                        type="text" 
+                        value={questionNum}
+                        onChange={(e) => setQuestionNum(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-center font-mono"
+                        />
+                        <button onClick={() => changeQuestionNum(1)} className="p-2 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700"><Plus size={14} /></button>
                     </div>
                 </div>
           </div>
