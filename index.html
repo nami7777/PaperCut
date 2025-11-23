@@ -37,8 +37,6 @@
     <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
     <!-- Load Tesseract.js for OCR -->
     <script src='https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js'></script>
-    <!-- Load JSZip for ZIP Import -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
       // Configure PDF.js worker
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -72,8 +70,10 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body class="bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 antialiased transition-colors duration-300">
     <div id="root"></div>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>
