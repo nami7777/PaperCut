@@ -1,12 +1,11 @@
 [build]
-  functions = "netlify/functions"
+  publish = "dist"                         # Your frontend build folder
+  functions = "netlify/functions"         # Where your functions live
 
 [dev]
-  command = "npm run dev"
-  targetPort = 3000
-  port = 8888
-  autoLaunch = true
-  functions = "netlify/functions"
+  targetPort = 3001                        # your Vite app port
+  framework = "vite"
+  port = 8888                              # Netlify functions port
 
 [[redirects]]
   from = "/api/*"

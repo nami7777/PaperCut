@@ -4,6 +4,11 @@ import { GoogleGenAI } from '@google/genai';
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 export const handler: Handler = async (event) => {
+  // DEBUG LOGS
+  console.log("API key present?", !!process.env.GEMINI_API_KEY);
+  console.log("Event body:", event.body);
+  console.log("API key present?", !!process.env.GEMINI_API_KEY);
+
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: '' };
 
   const { prompt } = JSON.parse(event.body || '{}');
@@ -39,3 +44,5 @@ Question: ${prompt}`;
     };
   }
 };
+
+
