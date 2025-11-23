@@ -32,6 +32,7 @@ const Import: React.FC = () => {
 
   const processFile = async (file: File) => {
       setProcessing(true);
+      setSuccessCount(null); // Reset success state
       try {
           // Check for JSON
           if (file.name.toLowerCase().endsWith('.json') || file.type === "application/json") {
@@ -41,13 +42,15 @@ const Import: React.FC = () => {
                   await bulkSaveQuestions(json);
                   setSuccessCount(json.length);
               } else {
-                  alert("Invalid format: Expected an array of questions");
+                  // Fallback: try to import singular object
+                  await bulkSaveQuestions([json]);
+                  setSuccessCount(1);
               }
           }
           // Check for ZIP
           else if (file.name.toLowerCase().endsWith('.zip') || file.type.includes('zip') || file.type === 'application/x-zip-compressed') {
               if (!window.JSZip) {
-                  throw new Error("ZIP processing library not loaded. Please check your internet connection and refresh.");
+                  throw new Error("ZIP processing library not loaded. Please refresh the page.");
               }
 
               const zip = new window.JSZip();
@@ -63,6 +66,8 @@ const Import: React.FC = () => {
                               const json = JSON.parse(content);
                               if (Array.isArray(json)) {
                                   extractedQuestions.push(...json);
+                              } else if (json && typeof json === 'object') {
+                                  extractedQuestions.push(json);
                               }
                           } catch (e) {
                               console.warn("Failed to parse JSON inside zip:", zipEntry.name);
@@ -78,7 +83,7 @@ const Import: React.FC = () => {
                   await bulkSaveQuestions(extractedQuestions);
                   setSuccessCount(extractedQuestions.length);
               } else {
-                  alert("No valid JSON files containing question arrays found in this ZIP archive.");
+                  alert("No valid JSON files found in this ZIP archive.");
               }
           } 
           else {
@@ -107,7 +112,8 @@ const Import: React.FC = () => {
                     <CheckCircle size={64} className="text-emerald-500 mx-auto mb-4" />
                     <h3 className="text-2xl font-bold text-emerald-500">Success!</h3>
                     <p className="text-slate-400">Imported {successCount} questions successfully.</p>
-                    <button onClick={() => navigate('/')} className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg">Go Home</button>
+                    <button onClick={() => { setSuccessCount(null); }} className="mt-6 px-6 py-2 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg mr-2 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">Import More</button>
+                    <button onClick={() => navigate('/')} className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">Go Home</button>
                 </div>
             ) : (
                 <div 
@@ -120,7 +126,7 @@ const Import: React.FC = () => {
                          <Upload size={48} className="text-slate-400" />
                          <FolderArchive size={48} className="text-slate-400 opacity-50" />
                     </div>
-                    <p className="font-medium mb-2">{processing ? "Processing..." : "Drag & Drop JSON or ZIP"}</p>
+                    <p className="font-medium mb-2">{processing ? "Processing Archive..." : "Drag & Drop JSON or ZIP"}</p>
                     <p className="text-sm text-slate-400 mb-6">Backup files or Bulk Archives</p>
                     <label className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer">
                         Browse Files
