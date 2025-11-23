@@ -130,6 +130,93 @@ export const updateQuestionStatus = async (id: string, status: string): Promise<
     });
 };
 
+export const updateQuestionMetadata = async (id: string, updates: { keywords?: string[], topics?: string[] }): Promise<void> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_QUESTIONS], 'readwrite');
+    const store = transaction.objectStore(STORE_QUESTIONS);
+    const getReq = store.get(id);
+
+    getReq.onsuccess = () => {
+      const question = getReq.result as QuestionEntry;
+      if (question) {
+        if (updates.keywords !== undefined) question.keywords = updates.keywords;
+        if (updates.topics !== undefined) question.topics = updates.topics;
+        store.put(question);
+        resolve();
+      } else {
+        reject("Question not found");
+      }
+    };
+    getReq.onerror = () => reject(getReq.error);
+  });
+};
+
+export const bulkAddTopicToQuestions = async (ids: string[], topic: string): Promise<void> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_QUESTIONS], 'readwrite');
+    const store = transaction.objectStore(STORE_QUESTIONS);
+    
+    if (ids.length === 0) {
+        resolve();
+        return;
+    }
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+
+    ids.forEach(id => {
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const q = getReq.result as QuestionEntry;
+        if (q) {
+          if (!q.topics.includes(topic)) {
+            q.topics.push(topic);
+            store.put(q);
+          }
+        }
+      };
+    });
+  });
+};
+
+export const deleteSubjectData = async (subject: string): Promise<void> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_QUESTIONS, STORE_FOLDERS], 'readwrite');
+    
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+
+    // Delete questions for subject
+    const qStore = transaction.objectStore(STORE_QUESTIONS);
+    const qIndex = qStore.index('subject');
+    const qReq = qIndex.openCursor(IDBKeyRange.only(subject));
+    
+    qReq.onsuccess = (e) => {
+        const cursor = (e.target as IDBRequest).result;
+        if (cursor) {
+            cursor.delete();
+            cursor.continue();
+        }
+    };
+
+    // Delete folders for subject
+    const fStore = transaction.objectStore(STORE_FOLDERS);
+    const fIndex = fStore.index('subject');
+    const fReq = fIndex.openCursor(IDBKeyRange.only(subject));
+    
+    fReq.onsuccess = (e) => {
+        const cursor = (e.target as IDBRequest).result;
+        if (cursor) {
+            cursor.delete();
+            cursor.continue();
+        }
+    };
+  });
+};
+
 export const getAllUniqueKeywords = async (subject?: string): Promise<string[]> => {
   const qs = subject ? await getQuestionsBySubject(subject) : await getAllQuestions();
   const set = new Set<string>();

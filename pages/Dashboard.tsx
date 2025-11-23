@@ -1,23 +1,32 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ArrowRight, Book, Settings, Upload } from 'lucide-react';
-import { getAllQuestions } from '../services/db';
+import { Plus, ArrowRight, Book, Settings, Upload, Trash2 } from 'lucide-react';
+import { getAllQuestions, deleteSubjectData } from '../services/db';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const [subjects, setSubjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const loadSubjects = async () => {
+    const allQs = await getAllQuestions();
+    const uniqueSubjects = Array.from(new Set(allQs.map(q => q.subject)));
+    setSubjects(uniqueSubjects.sort());
+    setLoading(false);
+  };
+
   useEffect(() => {
-    const loadSubjects = async () => {
-      const allQs = await getAllQuestions();
-      const uniqueSubjects = Array.from(new Set(allQs.map(q => q.subject)));
-      setSubjects(uniqueSubjects.sort());
-      setLoading(false);
-    };
     loadSubjects();
   }, []);
+
+  const handleDeleteSubject = async (e: React.MouseEvent, subject: string) => {
+    e.stopPropagation();
+    if (confirm(`Are you sure you want to delete "${subject}"? This will remove all questions and folders associated with it.`)) {
+        await deleteSubjectData(subject);
+        loadSubjects();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white p-8 font-sans flex flex-col">
@@ -68,14 +77,23 @@ const Home: React.FC = () => {
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
                 {subjects.map(sub => (
-                  <button
+                  <div
                     key={sub}
                     onClick={() => navigate(`/subject/${encodeURIComponent(sub)}`)}
-                    className="w-full flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 hover:bg-blue-50 dark:hover:bg-slate-700 text-left group transition-colors"
+                    className="w-full flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 hover:bg-blue-50 dark:hover:bg-slate-700 text-left group transition-colors cursor-pointer"
                   >
-                    <span className="font-semibold text-lg truncate">{sub}</span>
-                    <ArrowRight size={18} className="text-slate-400 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
-                  </button>
+                    <span className="font-semibold text-lg truncate flex-1">{sub}</span>
+                    <div className="flex items-center gap-2">
+                         <button 
+                            onClick={(e) => handleDeleteSubject(e, sub)}
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full transition-all opacity-0 group-hover:opacity-100"
+                            title="Delete Subject"
+                         >
+                            <Trash2 size={18} />
+                         </button>
+                        <ArrowRight size={18} className="text-slate-400 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

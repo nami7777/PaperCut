@@ -1,6 +1,14 @@
+[build]
+  functions = "netlify/functions"
+
 [dev]
   command = "npm run dev"
-  targetPort = 3000          # vite port
-  port = 8888                # netlify dev port
+  targetPort = 3000
+  port = 8888
   autoLaunch = true
-  functions = "netlify/functions"   # <-- key line
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
