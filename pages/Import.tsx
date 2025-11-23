@@ -1,7 +1,14 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { bulkSaveQuestions } from '../services/db';
-import { ArrowLeft, Upload, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Upload, CheckCircle, FolderArchive } from 'lucide-react';
+
+declare global {
+  interface Window {
+    JSZip: any;
+  }
+}
 
 const Import: React.FC = () => {
   const navigate = useNavigate();
@@ -13,40 +20,76 @@ const Import: React.FC = () => {
       e.preventDefault();
       setDragging(false);
       if(e.dataTransfer.files && e.dataTransfer.files[0]) {
-          processFile(e.dataTransfer.files[0]);
+          await processFile(e.dataTransfer.files[0]);
       }
   };
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
-          processFile(e.target.files[0]);
+          await processFile(e.target.files[0]);
       }
   };
 
-  const processFile = (file: File) => {
-      if (file.type !== "application/json") {
-          alert("Please upload a valid JSON file");
-          return;
-      }
-      
+  const processFile = async (file: File) => {
       setProcessing(true);
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-          try {
-              const json = JSON.parse(ev.target?.result as string);
+      try {
+          // Check for JSON
+          if (file.name.toLowerCase().endsWith('.json') || file.type === "application/json") {
+              const text = await file.text();
+              const json = JSON.parse(text);
               if (Array.isArray(json)) {
                   await bulkSaveQuestions(json);
                   setSuccessCount(json.length);
               } else {
                   alert("Invalid format: Expected an array of questions");
               }
-          } catch (e) {
-              alert("Failed to parse JSON");
-          } finally {
-              setProcessing(false);
           }
-      };
-      reader.readAsText(file);
+          // Check for ZIP
+          else if (file.name.toLowerCase().endsWith('.zip') || file.type.includes('zip') || file.type === 'application/x-zip-compressed') {
+              if (!window.JSZip) {
+                  throw new Error("ZIP processing library not loaded. Please check your internet connection and refresh.");
+              }
+
+              const zip = new window.JSZip();
+              const loadedZip = await zip.loadAsync(file);
+              
+              let extractedQuestions: any[] = [];
+              const parsePromises: Promise<void>[] = [];
+
+              loadedZip.forEach((relativePath: string, zipEntry: any) => {
+                  if (!zipEntry.dir && zipEntry.name.toLowerCase().endsWith('.json')) {
+                      const p = zipEntry.async('string').then((content: string) => {
+                          try {
+                              const json = JSON.parse(content);
+                              if (Array.isArray(json)) {
+                                  extractedQuestions.push(...json);
+                              }
+                          } catch (e) {
+                              console.warn("Failed to parse JSON inside zip:", zipEntry.name);
+                          }
+                      });
+                      parsePromises.push(p);
+                  }
+              });
+
+              await Promise.all(parsePromises);
+
+              if (extractedQuestions.length > 0) {
+                  await bulkSaveQuestions(extractedQuestions);
+                  setSuccessCount(extractedQuestions.length);
+              } else {
+                  alert("No valid JSON files containing question arrays found in this ZIP archive.");
+              }
+          } 
+          else {
+              alert("Please upload a valid .json file or a .zip archive.");
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Failed to process file: " + (e as Error).message);
+      } finally {
+          setProcessing(false);
+      }
   };
 
   return (
@@ -57,7 +100,7 @@ const Import: React.FC = () => {
             </button>
 
             <h1 className="text-3xl font-bold mb-2">Import Repository</h1>
-            <p className="text-slate-500 mb-8">Upload a previously exported PaperCut JSON file.</p>
+            <p className="text-slate-500 mb-8">Upload a JSON backup or a ZIP archive containing multiple JSON files.</p>
 
             {successCount !== null ? (
                 <div className="py-10 animate-in zoom-in">
@@ -73,12 +116,15 @@ const Import: React.FC = () => {
                   onDrop={handleDrop}
                   className={`border-2 border-dashed rounded-2xl p-12 transition-all ${dragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-slate-300 dark:border-slate-600'}`}
                 >
-                    <Upload size={48} className="mx-auto text-slate-400 mb-4" />
-                    <p className="font-medium mb-2">{processing ? "Processing..." : "Drag & Drop JSON file here"}</p>
-                    <p className="text-sm text-slate-400 mb-6">or</p>
+                    <div className="flex justify-center gap-2 mb-4">
+                         <Upload size={48} className="text-slate-400" />
+                         <FolderArchive size={48} className="text-slate-400 opacity-50" />
+                    </div>
+                    <p className="font-medium mb-2">{processing ? "Processing..." : "Drag & Drop JSON or ZIP"}</p>
+                    <p className="text-sm text-slate-400 mb-6">Backup files or Bulk Archives</p>
                     <label className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer">
                         Browse Files
-                        <input type="file" accept="application/json" className="hidden" onChange={handleFile} disabled={processing}/>
+                        <input type="file" accept=".json,.zip,application/json,application/zip,application/x-zip-compressed" className="hidden" onChange={handleFile} disabled={processing}/>
                     </label>
                 </div>
             )}
