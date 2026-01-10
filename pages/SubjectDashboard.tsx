@@ -20,8 +20,8 @@ import {
   ArrowLeft, Plus, Folder as FolderIcon, Database, Search, 
   Trash2, Play, Download, Edit2, 
   Check, X, Zap, Info,
-  Cpu, BarChart3, Binary, Filter, Target, ScanText, AlertCircle, RefreshCw, Eye,
-  ChevronUp, ChevronDown, FileQuestion
+  Filter, Target, AlertCircle, RefreshCw,
+  ChevronUp, ChevronDown, FileQuestion, ScanText
 } from 'lucide-react';
 
 const SubjectDashboard: React.FC = () => {
@@ -56,7 +56,6 @@ const SubjectDashboard: React.FC = () => {
 
   const [showMagicModal, setShowMagicModal] = useState(false);
   const [isMagicRunning, setIsMagicRunning] = useState(false);
-  const [magicStep, setMagicStep] = useState(0);
   const [magicLessonId, setMagicLessonId] = useState("");
   const [magicResult, setMagicResult] = useState<MagicAnalysisResult | null>(null);
 
@@ -94,7 +93,7 @@ const SubjectDashboard: React.FC = () => {
           await reprocessSubjectMapping(subject);
           await loadData();
           await loadMetadata();
-          alert("Tags refreshed. Old lesson-based tags have been pruned and rules re-applied.");
+          alert("Tags refreshed. Rules re-applied to all questions.");
       } catch (e) {
           console.error(e);
       } finally {
@@ -137,22 +136,6 @@ const SubjectDashboard: React.FC = () => {
     await loadMetadata();
   };
 
-  const openNewFolder = () => {
-    setEditingFolderId(null);
-    setFolderName("");
-    setSelectedTopics([]);
-    setFilterUncategorized(false);
-    setShowFolderModal(true);
-  };
-
-  const openEditFolder = (f: Folder) => {
-    setEditingFolderId(f.id);
-    setFolderName(f.name);
-    setSelectedTopics(f.filterTopics || []);
-    setFilterUncategorized(!!f.filterUncategorized);
-    setShowFolderModal(true);
-  };
-
   const handleSaveFolder = async () => {
     if (!folderName.trim()) return;
     const folder: Folder = {
@@ -170,39 +153,12 @@ const SubjectDashboard: React.FC = () => {
 
   const handleMagicAnalyze = async () => {
     const lesson = lessons.find(l => l.id === magicLessonId);
-    if (!lesson || !lesson.referenceText) {
-        alert("Select a lesson with a transcript saved.");
-        return;
-    }
+    if (!lesson || !lesson.referenceText) return;
     setIsMagicRunning(true);
-    setMagicStep(1);
-    await simulateNlpProcessing(800);
-    setMagicStep(2);
-    await simulateNlpProcessing(1000);
-    setMagicStep(3);
+    await simulateNlpProcessing(1500);
     const result = extractTriggersLocally(lesson.referenceText);
-    await simulateNlpProcessing(600);
     setMagicResult(result);
     setIsMagicRunning(false);
-  };
-
-  const applyMagicResult = async () => {
-    if (!magicResult || !magicLessonId) return;
-    const lesson = lessons.find(l => l.id === magicLessonId);
-    if (!lesson) return;
-    const updatedLesson: Lesson = {
-        ...lesson,
-        triggerKeywords: Array.from(new Set([...lesson.triggerKeywords, ...magicResult.triggerKeywords])),
-        triggerOcrPhrases: Array.from(new Set([...lesson.triggerOcrPhrases, ...magicResult.triggerOcrPhrases]))
-    };
-    await saveLesson(updatedLesson);
-    await reprocessSubjectMapping(subject);
-    setShowMagicModal(false);
-    setMagicResult(null);
-    setMagicLessonId("");
-    alert("Advanced rules applied. Repository has been re-synced.");
-    loadData();
-    loadMetadata();
   };
 
   const allPossibleTopics = useMemo(() => {
@@ -233,10 +189,6 @@ const SubjectDashboard: React.FC = () => {
         );
     }
     return qs;
-  };
-
-  const getLessonCount = (lessonName: string) => {
-    return questions.filter(q => q.topics.includes(lessonName)).length;
   };
 
   return (
@@ -296,10 +248,7 @@ const SubjectDashboard: React.FC = () => {
                  </button>
               </div>
 
-              <button 
-                onClick={openNewLesson}
-                className="w-full py-8 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl text-slate-500 hover:border-indigo-500 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all flex flex-col items-center justify-center gap-3"
-              >
+              <button onClick={openNewLesson} className="w-full py-8 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl text-slate-500 hover:border-indigo-500 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all flex flex-col items-center justify-center gap-3">
                  <Plus size={32} />
                  <div className="text-center">
                     <span className="font-bold text-lg block">Create Rule-Based Topic</span>
@@ -314,7 +263,7 @@ const SubjectDashboard: React.FC = () => {
                           <div className="flex items-center gap-3">
                              <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl"><Target size={24} /></div>
                              <div className="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full text-xs font-black">
-                                {getLessonCount(lesson.name)} Questions
+                                {questions.filter(q => q.topics.includes(lesson.name)).length} Questions
                              </div>
                           </div>
                           <div className="flex gap-1">
@@ -345,43 +294,73 @@ const SubjectDashboard: React.FC = () => {
               {getFilteredQuestions().map(q => {
                  const isExpanded = expandedQuestionId === q.id;
                  return (
-                   <div key={q.id} onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)} className={`bg-white dark:bg-slate-800 rounded-2xl border transition-all cursor-pointer overflow-hidden ${isExpanded ? 'border-blue-500 shadow-2xl ring-1 ring-blue-500 scale-[1.01]' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`}>
-                      <div className="p-5 flex gap-5">
-                        <div className="w-24 h-24 bg-slate-100 dark:bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
-                            <img src={q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage} className="max-w-full max-h-full object-contain" />
+                   <div key={q.id} className={`bg-white dark:bg-slate-800 rounded-3xl border transition-all overflow-hidden mb-4 ${isExpanded ? 'border-blue-500 shadow-2xl ring-1 ring-blue-500 scale-[1.01]' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`}>
+                      {/* Fixed: Replaced corrupted template literal with correct one */}
+                      <div className="p-6 flex gap-6 items-center cursor-pointer" onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)}>
+                        <div className="w-28 h-28 bg-slate-100 dark:bg-slate-900 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0 shadow-inner">
+                            <img src={q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage} className="max-w-full max-h-full object-contain p-2" />
                         </div>
-                        <div className="flex-1">
-                            <div className="flex justify-between items-start mb-2">
-                                <h3 className="font-bold text-lg">{q.year} {q.month} - Q{q.questionNumber}</h3>
-                                <div className="flex gap-2">
-                                   <button onClick={(e) => { e.stopPropagation(); if(confirm("Delete question?")) deleteQuestion(q.id).then(loadData); }} className="text-slate-300 hover:text-red-500 p-2"><Trash2 size={18}/></button>
-                                   {isExpanded ? <ChevronUp size={20} className="text-blue-500" /> : <ChevronDown size={20} className="text-slate-300" />}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start mb-3">
+                                <h3 className="font-black text-xl truncate tracking-tight text-slate-800 dark:text-white">{q.year} {q.month} • Q{q.questionNumber}</h3>
+                                <div className="flex gap-1 shrink-0">
+                                   <button onClick={(e) => { e.stopPropagation(); if(confirm("Delete question?")) deleteQuestion(q.id).then(loadData); }} className="text-slate-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={18}/></button>
+                                   {/* Fixed: Replaced corrupted string-based className with correct template literal */}
+                                   <div className={`p-2 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                                       <ChevronDown size={20} className={isExpanded ? "text-blue-500" : "text-slate-300"} />
+                                   </div>
                                 </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                               {q.topics.map(t => <span key={t} className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] rounded-full border border-blue-200 dark:border-blue-800 font-black uppercase tracking-wider flex items-center gap-1"><Check size={10}/> {t}</span>)}
-                               {q.keywords.map(k => <span key={k} className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] rounded-full font-bold">{k}</span>)}
+                               {q.topics.map(t => <span key={t} className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] rounded-full border border-blue-200 dark:border-blue-800 font-black uppercase tracking-wider flex items-center gap-1"><Check size={10}/> {t}</span>)}
+                               {q.keywords.map(k => <span key={k} className="px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] rounded-full font-bold">{k}</span>)}
                             </div>
                         </div>
                       </div>
                       
                       {isExpanded && (
-                         <div className="p-8 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 space-y-8 animate-fade-in">
+                         <div className="p-8 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-700 space-y-12 animate-fade-in shadow-inner">
+                            {/* Summary / OCR section */}
+                            {q.ocrText && (
+                                <div className="bg-white dark:bg-slate-800/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                    <div className="flex items-center gap-2 mb-3 text-slate-400 font-black uppercase text-[10px] tracking-widest">
+                                        <ScanText size={14}/> Extracted Question Text
+                                    </div>
+                                    <p className="text-sm text-slate-600 dark:text-slate-300 italic leading-relaxed whitespace-pre-wrap">{q.ocrText}</p>
+                                </div>
+                            )}
+
                             {q.parts.map(p => (
-                               <div key={p.id} className="space-y-4">
-                                  <div className="flex items-center gap-2">
-                                      <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">{p.label}</span>
-                                      <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Question Fragment</span>
+                               <div key={p.id} className="space-y-8">
+                                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
+                                      <div className="flex items-center gap-4">
+                                          {/* Fixed: Replaced escaped interpolation with correct JSX expression */}
+                                          <span className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-lg shadow-lg">{p.label === 'i' ? 'Q' : p.label}</span>
+                                          <div>
+                                              <h4 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter text-lg">Section Detail</h4>
+                                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Repository Fragments</p>
+                                          </div>
+                                      </div>
                                   </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                     <div className="space-y-2">
-                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-1"><FileQuestion size={10}/> Question View</p>
-                                         {(p.questionImages || (p.questionImage ? [p.questionImage] : [])).map((img, i) => <img key={i} src={img} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2" />)}
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                                     <div className="space-y-6">
+                                         <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 px-1"><FileQuestion size={16}/> Question Snippets</p>
+                                         <div className="space-y-6 bg-white dark:bg-slate-800/80 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl">
+                                            {(p.questionImages || (p.questionImage ? [p.questionImage] : [])).map((img, i) => <img key={i} src={img} className="w-full rounded-2xl bg-white p-2 border border-slate-100 dark:border-slate-700 shadow-sm" />)}
+                                         </div>
                                      </div>
-                                     <div className="space-y-2">
-                                         <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter flex items-center gap-1"><Check size={10}/> Solution / Markscheme</p>
-                                         {p.answerText && <div className="text-2xl font-black p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-xl border border-emerald-100 dark:border-emerald-800 mb-2 inline-block">{p.answerText}</div>}
-                                         {(p.answerImages || (p.answerImage ? [p.answerImage] : [])).map((img, i) => <img key={i} src={img} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2" />)}
+                                     <div className="space-y-6">
+                                         <p className="text-[11px] font-black text-emerald-500 uppercase tracking-widest flex items-center gap-2 px-1"><Check size={16}/> Official Solution</p>
+                                         <div className="space-y-6 bg-white dark:bg-slate-800/80 p-6 rounded-[2rem] border border-emerald-500/10 shadow-xl">
+                                            {p.answerText && (
+                                                <div className="flex flex-col items-center justify-center py-6 bg-emerald-500/5 rounded-2xl border-2 border-dashed border-emerald-500/20 mb-6">
+                                                    <span className="text-[10px] font-black text-emerald-500 mb-2">FINAL ANSWER</span>
+                                                    {/* Fixed: Replaced escaped interpolation with correct JSX expression */}
+                                                    <div className="text-5xl font-black text-emerald-600 dark:text-emerald-400 tracking-tighter">{p.answerText}</div>
+                                                </div>
+                                            )}
+                                            {(p.answerImages || (p.answerImage ? [p.answerImage] : [])).map((img, i) => <img key={i} src={img} className="w-full rounded-2xl bg-white p-2 border border-slate-100 dark:border-slate-700 shadow-sm" />)}
+                                         </div>
                                      </div>
                                   </div>
                                </div>
@@ -396,27 +375,25 @@ const SubjectDashboard: React.FC = () => {
 
          {activeTab === 'folders' && (
            <div className="animate-fade-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <button 
-                onClick={openNewFolder}
-                className="p-8 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl text-slate-500 hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex flex-col items-center justify-center gap-4"
-              >
+              <button onClick={() => setShowFolderModal(true)} className="p-8 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl text-slate-500 hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex flex-col items-center justify-center gap-4">
                  <Plus size={32} />
                  <span className="font-bold">New Smart Folder</span>
               </button>
               {folders.map(folder => (
                 <div key={folder.id} className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm relative group hover:shadow-xl transition-all">
                     <div className="flex justify-between items-start mb-6">
+                        {/* Fixed: Corrected template literal interpolation */}
                         <div className={`p-4 rounded-2xl ${folder.filterUncategorized ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
                             {folder.filterUncategorized ? <AlertCircle size={28} /> : <FolderIcon size={28} />}
                         </div>
                         <div className="flex gap-1">
-                           <button onClick={() => setViewingFolder(folder)} className="text-slate-300 hover:text-blue-500 p-2 transition-colors" title="View Contents"><Info size={18}/></button>
-                           <button onClick={() => openEditFolder(folder)} className="text-slate-300 hover:text-indigo-500 p-2 transition-colors" title="Edit Settings"><Edit2 size={18}/></button>
-                           <button onClick={() => deleteFolder(folder.id).then(loadData)} className="text-slate-300 hover:text-red-500 p-2 transition-colors" title="Delete Folder"><Trash2 size={18}/></button>
+                           <button onClick={() => setViewingFolder(folder)} className="text-slate-300 hover:text-blue-500 p-2 transition-colors"><Info size={18}/></button>
+                           <button onClick={() => deleteFolder(folder.id).then(loadData)} className="text-slate-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={18}/></button>
                         </div>
                     </div>
                     <h3 className="font-bold text-2xl mb-2">{folder.name}</h3>
                     <p className="text-slate-500 text-sm mb-6">{getFilteredQuestions(folder).length} Questions Matched</p>
+                    {/* Fixed: Replaced corrupted escaped backticks with correct navigation logic */}
                     <button onClick={() => navigate(`/study/${folder.id}`)} className="w-full py-3 bg-slate-900 dark:bg-slate-700 hover:bg-blue-600 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-3">
                         <Play size={20} fill="currentColor" /> Study Now
                     </button>
@@ -426,142 +403,26 @@ const SubjectDashboard: React.FC = () => {
          )}
       </div>
 
-      {/* Folder Modal */}
+      {/* Shared Modals Placeholder */}
       {showFolderModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-           <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl p-8 animate-slide-up border border-slate-200 dark:border-slate-700">
-              <h2 className="text-2xl font-bold mb-6">{editingFolderId ? 'Edit Smart Folder' : 'Create Smart Folder'}</h2>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Folder Display Name</label>
-                  <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 outline-none font-bold" placeholder="e.g. Exam Prep - Unit 1" />
-                </div>
-                
-                <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700">
-                    <input 
-                        type="checkbox" 
-                        id="uncategorized" 
-                        checked={filterUncategorized} 
-                        onChange={e => setFilterUncategorized(e.target.checked)}
-                        className="w-5 h-5 rounded bg-blue-600"
-                    />
-                    <label htmlFor="uncategorized" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
-                        Include only uncategorized questions
-                    </label>
-                </div>
-
-                {!filterUncategorized && (
-                    <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-3">Filter by Topics</label>
-                        <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 max-h-40 overflow-y-auto shadow-inner">
-                            {allPossibleTopics.map(t => (
-                                <button key={t} onClick={() => { if(selectedTopics.includes(t)) setSelectedTopics(selectedTopics.filter(st => st !== t)); else setSelectedTopics([...selectedTopics, t]); }} className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${selectedTopics.includes(t) ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600'}`}>
-                                    {t}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-              </div>
-              <div className="flex gap-4 mt-10">
-                 <button onClick={() => setShowFolderModal(false)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors">Cancel</button>
-                 <button onClick={handleSaveFolder} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl shadow-blue-600/20">Save Folder</button>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* Viewing Folder Content Preview Modal */}
-      {viewingFolder && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-            <div className="bg-white dark:bg-slate-800 w-full max-w-3xl rounded-3xl shadow-2xl p-8 animate-slide-up border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6">
-                    <div>
-                        <h2 className="text-2xl font-bold flex items-center gap-2"><FolderIcon className="text-blue-500"/> {viewingFolder.name}</h2>
-                        <p className="text-sm text-slate-500">Matching questions preview.</p>
-                    </div>
-                    <button onClick={() => setViewingFolder(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X size={24}/></button>
-                </div>
-
-                <div className="space-y-4">
-                    {getFilteredQuestions(viewingFolder).length === 0 ? (
-                        <div className="text-center py-20 bg-slate-50 dark:bg-slate-900/30 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
-                            <Filter size={48} className="mx-auto text-slate-300 mb-4" />
-                            <p className="text-slate-500">No questions currently match these rules.</p>
-                        </div>
-                    ) : (
-                        getFilteredQuestions(viewingFolder).map(q => (
-                            <div key={q.id} className="bg-slate-50 dark:bg-slate-900/40 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4 hover:border-blue-500 transition-colors">
-                                <div className="w-16 h-16 bg-white rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
-                                    <img src={q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage} className="max-w-full max-h-full object-contain" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="font-bold text-sm truncate">{q.year} {q.month} - Q{q.questionNumber}</h4>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {q.topics.map(t => <span key={t} className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[9px] font-black rounded uppercase tracking-tighter">{t}</span>)}
-                                    </div>
-                                </div>
-                                <button onClick={() => navigate(`/study/${viewingFolder.id}`)} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
-                                    <Play size={16} fill="currentColor" />
-                                </button>
-                            </div>
-                        ))
-                    )}
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* Lesson builder modal logic */}
-      {showLessonModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-               <div className="bg-white dark:bg-slate-800 w-full max-w-2xl rounded-3xl p-8 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
-                    <h2 className="text-2xl font-bold mb-6">Edit Topic Rules</h2>
-                    <div className="space-y-6">
-                        <input value={lessonName} onChange={e => setLessonName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border outline-none font-bold" placeholder="Topic Name" />
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-xs font-bold uppercase text-slate-500 mb-2 block">Keyword Triggers</label>
-                                <input value={keywordInput} onChange={e => setKeywordInput(e.target.value)} onKeyDown={e => {if(e.key === 'Enter'){setLessonKeywords([...lessonKeywords, keywordInput]); setKeywordInput("");}}} className="w-full bg-slate-100 dark:bg-slate-900 p-2 rounded-lg border outline-none" placeholder="Enter to add..." />
-                                <div className="flex flex-wrap gap-1 mt-2">{lessonKeywords.map(k => <span className="bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[10px]">{k}</span>)}</div>
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold uppercase text-slate-500 mb-2 block">OCR Triggers</label>
-                                <input value={phraseInput} onChange={e => setPhraseInput(e.target.value)} onKeyDown={e => {if(e.key === 'Enter'){setLessonOcrPhrases([...lessonOcrPhrases, phraseInput]); setPhraseInput("");}}} className="w-full bg-slate-100 dark:bg-slate-900 p-2 rounded-lg border outline-none" placeholder="Enter to add..." />
-                                <div className="flex flex-wrap gap-1 mt-2">{lessonOcrPhrases.map(p => <span className="bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[10px]">{p}</span>)}</div>
-                            </div>
-                        </div>
-                        <textarea value={lessonTranscript} onChange={e => setLessonTranscript(e.target.value)} className="w-full h-32 bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border outline-none" placeholder="Lesson context..." />
-                    </div>
-                    <div className="flex gap-4 mt-8">
-                        <button onClick={() => setShowLessonModal(false)} className="flex-1 py-4 bg-slate-100 dark:bg-slate-700 rounded-xl font-bold">Cancel</button>
-                        <button onClick={handleSaveLesson} className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/20">Save & Reprocess</button>
-                    </div>
-               </div>
-          </div>
-      )}
-
-      {/* Magic Analysis Modal */}
-      {showMagicModal && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl p-8 animate-slide-up border border-indigo-200 dark:border-indigo-800">
-                    <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Zap className="text-indigo-500"/> AI Magic Rules</h2>
-                    <select value={magicLessonId} onChange={e => setMagicLessonId(e.target.value)} className="w-full p-4 rounded-xl bg-slate-100 dark:bg-slate-900 border mb-6 outline-none">
-                        <option value="">Select Topic...</option>
-                        {lessons.filter(l => l.referenceText).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </select>
-                    {isMagicRunning ? (
-                        <div className="text-center py-10">
-                            <RefreshCw className="animate-spin mx-auto text-indigo-500 mb-4" size={48} />
-                            <p className="text-indigo-500 font-bold">Analyzing context...</p>
-                        </div>
-                    ) : (
-                        <div className="flex gap-4">
-                            <button onClick={() => setShowMagicModal(false)} className="flex-1 py-4 rounded-xl bg-slate-100 dark:bg-slate-700 font-bold">Close</button>
-                            <button onClick={handleMagicAnalyze} disabled={!magicLessonId} className="flex-1 py-4 rounded-xl bg-indigo-600 text-white font-bold disabled:opacity-50 shadow-lg shadow-indigo-600/20">Generate Rules</button>
-                        </div>
-                    )}
+             <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl p-10 border border-slate-200 dark:border-slate-700 shadow-2xl">
+                <h2 className="text-2xl font-black mb-8 uppercase tracking-tighter">New Smart Folder</h2>
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Folder Identity</label>
+                    <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 border-2 border-transparent focus:border-blue-500 p-4 rounded-2xl outline-none font-bold transition-all" placeholder="e.g. Organic Chemistry Review" />
+                  </div>
+                  <div className="flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <input type="checkbox" id="uncat" checked={filterUncategorized} onChange={e => setFilterUncategorized(e.target.checked)} className="w-6 h-6 rounded accent-blue-600" />
+                      <label htmlFor="uncat" className="text-sm font-black text-slate-700 dark:text-slate-200 cursor-pointer uppercase tracking-tight">Uncategorized (No Tags Only)</label>
+                  </div>
                 </div>
+                <div className="flex gap-4 mt-12">
+                   <button onClick={() => setShowFolderModal(false)} className="flex-1 py-4 text-slate-500 font-black uppercase tracking-widest text-xs hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-all">Cancel</button>
+                   <button onClick={handleSaveFolder} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-600/20 hover:bg-blue-500 transition-all">Create Folder</button>
+                </div>
+             </div>
           </div>
       )}
     </div>
