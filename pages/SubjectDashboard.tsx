@@ -10,7 +10,6 @@ import {
   deleteFolder, 
   getAllUniqueKeywords, 
   getAllUniqueTopics, 
-  updateQuestionMetadata, 
   getLessonsBySubject,
   saveLesson,
   deleteLesson,
@@ -19,9 +18,9 @@ import {
 import { extractTriggersLocally, simulateNlpProcessing, MagicAnalysisResult } from '../services/nlp';
 import { 
   ArrowLeft, Plus, Folder as FolderIcon, Database, Search, 
-  Trash2, Play, Download, ChevronDown, ChevronUp, Edit2, 
-  Check, X, Wand2, Sparkles, BookOpen, Settings2, Loader2, Info,
-  Cpu, Zap, BarChart3, Binary, Filter, Target, ScanText, AlertCircle
+  Trash2, Play, Download, Edit2, 
+  Check, X, Zap, Info,
+  Cpu, BarChart3, Binary, Filter, Target, ScanText, AlertCircle, RefreshCw
 } from 'lucide-react';
 
 const SubjectDashboard: React.FC = () => {
@@ -34,21 +33,19 @@ const SubjectDashboard: React.FC = () => {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
   
-  // Modal Visibility State
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [showLessonModal, setShowLessonModal] = useState(false);
+  const [viewingFolder, setViewingFolder] = useState<Folder | null>(null);
   
-  // Editing State
   const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
 
-  // Folder Form State
   const [folderName, setFolderName] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [filterUncategorized, setFilterUncategorized] = useState(false);
   
-  // Lesson Form State
   const [lessonName, setLessonName] = useState("");
   const [lessonKeywords, setLessonKeywords] = useState<string[]>([]);
   const [lessonOcrPhrases, setLessonOcrPhrases] = useState<string[]>([]);
@@ -56,17 +53,14 @@ const SubjectDashboard: React.FC = () => {
   const [phraseInput, setPhraseInput] = useState("");
   const [lessonTranscript, setLessonTranscript] = useState("");
 
-  // Magic Tag State
   const [showMagicModal, setShowMagicModal] = useState(false);
   const [isMagicRunning, setIsMagicRunning] = useState(false);
   const [magicStep, setMagicStep] = useState(0);
   const [magicLessonId, setMagicLessonId] = useState("");
   const [magicResult, setMagicResult] = useState<MagicAnalysisResult | null>(null);
 
-  // Metadata
   const [availableKeywords, setAvailableKeywords] = useState<string[]>([]);
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
-
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,7 +87,19 @@ const SubjectDashboard: React.FC = () => {
     setAvailableTopics(tp);
   };
 
-  // --- Lesson Handlers ---
+  const handleSyncAll = async () => {
+      setIsSyncing(true);
+      try {
+          await reprocessSubjectMapping(subject);
+          await loadData();
+          await loadMetadata();
+          alert("All questions have been re-analyzed based on current topic rules.");
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setIsSyncing(false);
+      }
+  };
 
   const openNewLesson = () => {
     setEditingLessonId(null);
@@ -130,28 +136,19 @@ const SubjectDashboard: React.FC = () => {
     await loadMetadata();
   };
 
-  const handleDeleteLesson = async (id: string) => {
-    if (confirm("Delete this Topic definition? Questions already tagged will keep their tags, but no new questions will be auto-tagged.")) {
-      await deleteLesson(id);
-      loadData();
-    }
-  };
-
-  // --- Folder Handlers ---
-
   const openNewFolder = () => {
     setEditingFolderId(null);
     setFolderName("");
-    setSelectedTags([]);
     setSelectedTopics([]);
+    setFilterUncategorized(false);
     setShowFolderModal(true);
   };
 
   const openEditFolder = (f: Folder) => {
     setEditingFolderId(f.id);
     setFolderName(f.name);
-    setSelectedTags(f.filterKeywords || []);
     setSelectedTopics(f.filterTopics || []);
+    setFilterUncategorized(!!f.filterUncategorized);
     setShowFolderModal(true);
   };
 
@@ -161,15 +158,14 @@ const SubjectDashboard: React.FC = () => {
       id: editingFolderId || Date.now().toString(),
       name: folderName,
       subject: subject,
-      filterKeywords: selectedTags,
-      filterTopics: selectedTopics
+      filterKeywords: [],
+      filterTopics: selectedTopics,
+      filterUncategorized: filterUncategorized
     };
     await saveFolder(folder);
     setShowFolderModal(false);
     loadData();
   };
-
-  // --- Magic Analysis ---
 
   const handleMagicAnalyze = async () => {
     const lesson = lessons.find(l => l.id === magicLessonId);
@@ -208,7 +204,6 @@ const SubjectDashboard: React.FC = () => {
     loadMetadata();
   };
 
-  // Combine topics already on questions with defined lesson names to ensure nothing is missed
   const allPossibleTopics = useMemo(() => {
     const lessonNames = lessons.map(l => l.name);
     const uniqueTags = availableTopics;
@@ -218,11 +213,14 @@ const SubjectDashboard: React.FC = () => {
   const getFilteredQuestions = (folder?: Folder) => {
     let qs = questions;
     if (folder) {
-      qs = qs.filter(q => {
-        const matchesKeyword = folder.filterKeywords.length === 0 || folder.filterKeywords.some(k => (q.keywords || []).includes(k));
-        const matchesTopic = folder.filterTopics.length === 0 || folder.filterTopics.some(t => (q.topics || []).includes(t));
-        return matchesKeyword && matchesTopic;
-      });
+      if (folder.filterUncategorized) {
+          qs = qs.filter(q => q.topics.length === 0);
+      } else {
+          qs = qs.filter(q => {
+            const matchesTopic = folder.filterTopics.length === 0 || folder.filterTopics.some(t => (q.topics || []).includes(t));
+            return matchesTopic;
+          });
+      }
     }
     if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -242,7 +240,6 @@ const SubjectDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white">
-      {/* Header */}
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -261,7 +258,6 @@ const SubjectDashboard: React.FC = () => {
       </div>
 
       <div className="max-w-6xl mx-auto p-6">
-         {/* Navigation Tabs */}
          <div className="flex mb-8 bg-slate-200 dark:bg-slate-800 p-1 rounded-2xl inline-flex shadow-inner border border-slate-300 dark:border-slate-700">
            {['repo', 'lessons', 'folders'].map(tab => (
               <button 
@@ -279,12 +275,22 @@ const SubjectDashboard: React.FC = () => {
 
          {activeTab === 'lessons' && (
            <div className="animate-fade-in space-y-6">
-              <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 p-4 rounded-xl flex items-start gap-4 mb-4">
-                 <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg"><Info size={20}/></div>
-                 <div>
-                    <h4 className="font-bold text-blue-800 dark:text-blue-300">How Rule-Based Tagging Works</h4>
-                    <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">When you define a Topic (e.g., "A.1"), you set rules. If a new question matches your keywords OR your OCR phrases, it will automatically be tagged with that Topic.</p>
+              <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                 <div className="flex items-start gap-4">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg"><Info size={20}/></div>
+                    <div>
+                        <h4 className="font-bold text-blue-800 dark:text-blue-300">Rule Engine Management</h4>
+                        <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">Updates to topic triggers require a re-sync to apply to existing questions.</p>
+                    </div>
                  </div>
+                 <button 
+                    onClick={handleSyncAll}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all disabled:opacity-50"
+                 >
+                    {isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <RefreshCw size={18}/>}
+                    Sync All Topics
+                 </button>
               </div>
 
               <button 
@@ -294,13 +300,13 @@ const SubjectDashboard: React.FC = () => {
                  <Plus size={32} />
                  <div className="text-center">
                     <span className="font-bold text-lg block">Create Rule-Based Topic</span>
-                    <span className="text-xs opacity-60">Define automatic classification logic for your questions</span>
+                    <span className="text-xs opacity-60">Automatic classification based on text matching</span>
                  </div>
               </button>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                  {lessons.map(lesson => (
-                    <div key={lesson.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:border-indigo-500 transition-colors relative overflow-hidden group">
+                    <div key={lesson.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:border-indigo-500 transition-colors group">
                        <div className="flex justify-between items-start mb-6">
                           <div className="flex items-center gap-3">
                              <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl"><Target size={24} /></div>
@@ -310,28 +316,10 @@ const SubjectDashboard: React.FC = () => {
                           </div>
                           <div className="flex gap-1">
                              <button onClick={() => openEditLesson(lesson)} className="text-slate-300 hover:text-indigo-500 p-2 transition-colors"><Edit2 size={18}/></button>
-                             <button onClick={() => handleDeleteLesson(lesson.id)} className="text-slate-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={18}/></button>
+                             <button onClick={() => deleteLesson(lesson.id).then(loadData)} className="text-slate-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={18}/></button>
                           </div>
                        </div>
-                       
                        <h3 className="font-bold text-xl mb-6">{lesson.name}</h3>
-                       
-                       <div className="space-y-4">
-                          <div>
-                             <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block mb-2 flex items-center gap-1"><Zap size={10}/> Keyword Triggers</span>
-                             <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                                {lesson.triggerKeywords?.map(k => <span key={k} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] rounded-lg border border-slate-200 dark:border-slate-600">{k}</span>)}
-                                {(!lesson.triggerKeywords || lesson.triggerKeywords.length === 0) && <span className="text-xs text-slate-400 italic">None defined</span>}
-                             </div>
-                          </div>
-                          <div>
-                             <span className="text-[10px] font-bold text-purple-500 uppercase tracking-widest block mb-2 flex items-center gap-1"><ScanText size={10}/> OCR Phrase Triggers</span>
-                             <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                                {lesson.triggerOcrPhrases?.map(p => <span key={p} className="px-2 py-0.5 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 text-[10px] rounded-lg border border-purple-100 dark:border-purple-800 italic">"{p}"</span>)}
-                                {(!lesson.triggerOcrPhrases || lesson.triggerOcrPhrases.length === 0) && <span className="text-xs text-slate-400 italic">None defined</span>}
-                             </div>
-                          </div>
-                       </div>
                     </div>
                  ))}
               </div>
@@ -356,33 +344,17 @@ const SubjectDashboard: React.FC = () => {
                  return (
                    <div key={q.id} onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)} className={`bg-white dark:bg-slate-800 rounded-2xl border transition-all cursor-pointer overflow-hidden ${isExpanded ? 'border-blue-500 shadow-2xl ring-1 ring-blue-500 scale-[1.01]' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`}>
                       <div className="p-5 flex gap-5">
-                        <div className="w-24 h-24 bg-slate-100 dark:bg-slate-900 rounded-xl flex-shrink-0 overflow-hidden border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                        <div className="w-24 h-24 bg-slate-100 dark:bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center">
                             <img src={q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage} className="max-w-full max-h-full object-contain" />
                         </div>
                         <div className="flex-1">
-                            <div className="flex justify-between items-start mb-2">
-                                <h3 className="font-bold text-lg">{q.year} {q.month} - Q{q.questionNumber}</h3>
-                                <button onClick={(e) => { e.stopPropagation(); if(confirm("Delete question?")) deleteQuestion(q.id).then(loadData); }} className="text-slate-300 hover:text-red-500 transition-colors p-2"><Trash2 size={18}/></button>
-                            </div>
+                            <h3 className="font-bold text-lg mb-2">{q.year} {q.month} - Q{q.questionNumber}</h3>
                             <div className="flex flex-wrap gap-2">
                                {q.topics.map(t => <span key={t} className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] rounded-full border border-blue-200 dark:border-blue-800 font-black uppercase tracking-wider flex items-center gap-1"><Check size={10}/> {t}</span>)}
                                {q.keywords.map(k => <span key={k} className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] rounded-full font-bold">{k}</span>)}
                             </div>
                         </div>
                       </div>
-                      {isExpanded && (
-                         <div className="p-8 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 space-y-6 animate-fade-in">
-                            {q.parts.map(p => (
-                               <div key={p.id} className="space-y-3">
-                                  <div className="flex items-center gap-2 mb-2">
-                                      <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">{p.label}</span>
-                                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Question Segment</span>
-                                  </div>
-                                  {(p.questionImages || [p.questionImage]).filter(Boolean).map((img, i) => <img key={i} src={img} className="max-w-full rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm" />)}
-                               </div>
-                            ))}
-                         </div>
-                      )}
                    </div>
                  );
               })}
@@ -401,9 +373,12 @@ const SubjectDashboard: React.FC = () => {
               {folders.map(folder => (
                 <div key={folder.id} className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm relative group hover:shadow-xl transition-all">
                     <div className="flex justify-between items-start mb-6">
-                        <div className="p-4 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-2xl"><FolderIcon size={28} /></div>
+                        <div className={`p-4 rounded-2xl ${folder.filterUncategorized ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
+                            {folder.filterUncategorized ? <AlertCircle size={28} /> : <FolderIcon size={28} />}
+                        </div>
                         <div className="flex gap-1">
-                           <button onClick={() => openEditFolder(folder)} className="text-slate-300 hover:text-blue-500 p-2"><Edit2 size={18}/></button>
+                           <button onClick={() => setViewingFolder(folder)} className="text-slate-300 hover:text-blue-500 p-2"><Info size={18}/></button>
+                           <button onClick={() => openEditFolder(folder)} className="text-slate-300 hover:text-indigo-500 p-2"><Edit2 size={18}/></button>
                            <button onClick={() => deleteFolder(folder.id).then(loadData)} className="text-slate-300 hover:text-red-500 p-2"><Trash2 size={18}/></button>
                         </div>
                     </div>
@@ -418,79 +393,7 @@ const SubjectDashboard: React.FC = () => {
          )}
       </div>
 
-      {/* Lesson Builder Modal */}
-      {showLessonModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-           <div className="bg-white dark:bg-slate-800 w-full max-w-2xl rounded-3xl shadow-2xl p-8 animate-slide-up border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center gap-4 mb-8">
-                <div className="p-4 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl"><Target size={28} /></div>
-                <div>
-                   <h2 className="text-3xl font-bold">{editingLessonId ? 'Edit Smart Topic' : 'New Smart Topic'}</h2>
-                   <p className="text-sm text-slate-500">Define the logic for automatic categorization.</p>
-                </div>
-              </div>
-              
-              <div className="space-y-8">
-                <div>
-                  <label className="block text-[10px] font-bold mb-2 text-slate-400 uppercase tracking-[0.2em]">Topic Name (e.g. A.1 Structure)</label>
-                  <input type="text" value={lessonName} onChange={e => setLessonName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-lg font-medium focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="Enter topic code or name..." />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Keyword Rules */}
-                    <div>
-                        <label className="block text-[10px] font-bold mb-2 text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Zap size={14}/> Trigger Keywords</label>
-                        <p className="text-xs text-slate-500 mb-3 leading-relaxed">Questions with these manual tags will be auto-linked.</p>
-                        <div className="flex gap-2 mb-3">
-                            <input 
-                              type="text" 
-                              value={keywordInput}
-                              onChange={e => setKeywordInput(e.target.value)}
-                              onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); if(keywordInput.trim()) setLessonKeywords([...lessonKeywords, keywordInput.trim()]); setKeywordInput(""); } }}
-                              className="flex-1 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
-                              placeholder="Add keyword..." 
-                            />
-                        </div>
-                        <div className="flex flex-wrap gap-2 min-h-[40px]">
-                            {lessonKeywords.map(k => <span key={k} className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-lg border border-indigo-100 dark:border-indigo-800 flex items-center gap-1">{k} <button onClick={() => setLessonKeywords(lessonKeywords.filter(tk => tk !== k))}><X size={12}/></button></span>)}
-                        </div>
-                    </div>
-
-                    {/* OCR Phrase Rules */}
-                    <div>
-                        <label className="block text-[10px] font-bold mb-2 text-purple-500 uppercase tracking-widest flex items-center gap-2"><ScanText size={14}/> OCR Triggers</label>
-                        <p className="text-xs text-slate-500 mb-3 leading-relaxed">Automatic detection if these phrases appear in the question text.</p>
-                        <div className="flex gap-2 mb-3">
-                            <input 
-                              type="text" 
-                              value={phraseInput}
-                              onChange={e => setPhraseInput(e.target.value)}
-                              onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); if(phraseInput.trim()) setLessonOcrPhrases([...lessonOcrPhrases, phraseInput.trim()]); setPhraseInput(""); } }}
-                              className="flex-1 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none" 
-                              placeholder="Add specific phrase..." 
-                            />
-                        </div>
-                        <div className="flex flex-wrap gap-2 min-h-[40px]">
-                            {lessonOcrPhrases.map(p => <span key={p} className="px-3 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 text-xs font-bold italic rounded-lg border border-purple-100 dark:border-purple-800 flex items-center gap-1">"{p}" <button onClick={() => setLessonOcrPhrases(lessonOcrPhrases.filter(tp => tp !== p))}><X size={12}/></button></span>)}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
-                  <label className="block text-[10px] font-bold mb-2 text-slate-400 uppercase tracking-widest flex items-center gap-2"><BookOpen size={14}/> Context for AI Analysis (Optional)</label>
-                  <textarea value={lessonTranscript} onChange={e => setLessonTranscript(e.target.value)} className="w-full h-32 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none transition-all" placeholder="Paste lesson notes here. Use 'Magic Rules' later to discover triggers from this text..." />
-                </div>
-              </div>
-
-              <div className="flex gap-4 mt-12">
-                 <button onClick={() => setShowLessonModal(false)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors">Cancel</button>
-                 <button onClick={handleSaveLesson} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-500 font-bold shadow-2xl shadow-indigo-600/20 border border-indigo-400">Save & Apply Rules</button>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* Smart Folder Modal */}
+      {/* Folder Modal */}
       {showFolderModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
            <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl p-8 animate-slide-up border border-slate-200 dark:border-slate-700">
@@ -500,128 +403,117 @@ const SubjectDashboard: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Folder Display Name</label>
                   <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 outline-none font-bold" placeholder="e.g. Exam Prep - Unit 1" />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-3">Filter by Topics</label>
-                  <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 max-h-40 overflow-y-auto shadow-inner">
-                    {allPossibleTopics.map(t => (
-                        <button key={t} onClick={() => { if(selectedTopics.includes(t)) setSelectedTopics(selectedTopics.filter(st => st !== t)); else setSelectedTopics([...selectedTopics, t]); }} className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${selectedTopics.includes(t) ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600'}`}>
-                            {t}
-                        </button>
-                    ))}
-                    {allPossibleTopics.length === 0 && <p className="text-xs text-slate-400 p-2 text-center w-full">No topics defined yet. Create a Rule-Based Topic first!</p>}
-                  </div>
+                
+                <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <input 
+                        type="checkbox" 
+                        id="uncategorized" 
+                        checked={filterUncategorized} 
+                        onChange={e => setFilterUncategorized(e.target.checked)}
+                        className="w-5 h-5 rounded bg-blue-600"
+                    />
+                    <label htmlFor="uncategorized" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                        Include only uncategorized questions
+                    </label>
                 </div>
+
+                {!filterUncategorized && (
+                    <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-3">Filter by Topics</label>
+                        <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 max-h-40 overflow-y-auto shadow-inner">
+                            {allPossibleTopics.map(t => (
+                                <button key={t} onClick={() => { if(selectedTopics.includes(t)) setSelectedTopics(selectedTopics.filter(st => st !== t)); else setSelectedTopics([...selectedTopics, t]); }} className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${selectedTopics.includes(t) ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600'}`}>
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
               </div>
               <div className="flex gap-4 mt-10">
                  <button onClick={() => setShowFolderModal(false)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors">Cancel</button>
-                 <button onClick={handleSaveFolder} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl shadow-blue-600/20 border border-blue-500">Save Folder</button>
+                 <button onClick={handleSaveFolder} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl shadow-blue-600/20">Save Folder</button>
               </div>
            </div>
         </div>
       )}
 
-      {/* Magic Rules Analyzer Modal */}
-      {showMagicModal && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-              <div className="bg-white dark:bg-slate-800 w-full max-w-xl rounded-3xl shadow-2xl p-8 animate-slide-up border border-indigo-200 dark:indigo-800 overflow-hidden">
-                  <div className="flex items-center gap-4 mb-8">
-                      <div className="p-4 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl shadow-inner"><Cpu size={28} /></div>
-                      <div>
-                          <h2 className="text-2xl font-bold">AI Rule Generator</h2>
-                          <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-black">Local Lexical Engine v3.0</p>
-                      </div>
-                  </div>
-                  
-                  {!magicResult ? (
+      {/* Viewing Folder Content */}
+      {viewingFolder && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+            <div className="bg-white dark:bg-slate-800 w-full max-w-3xl rounded-3xl shadow-2xl p-8 animate-slide-up border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 className="text-2xl font-bold flex items-center gap-2"><FolderIcon className="text-blue-500"/> {viewingFolder.name}</h2>
+                        <p className="text-sm text-slate-500">Matching questions for this smart folder.</p>
+                    </div>
+                    <button onClick={() => setViewingFolder(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X size={24}/></button>
+                </div>
+
+                <div className="space-y-4">
+                    {getFilteredQuestions(viewingFolder).map(q => (
+                        <div key={q.id} className="bg-slate-50 dark:bg-slate-900/40 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4">
+                            <div className="w-16 h-16 bg-white rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
+                                <img src={q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage} className="max-w-full max-h-full object-contain" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <h4 className="font-bold text-sm truncate">{q.year} {q.month} - Q{q.questionNumber}</h4>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                    {q.topics.map(t => <span key={t} className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[9px] font-black rounded uppercase tracking-tighter">{t}</span>)}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Lesson builder modal simplified logic */}
+      {showLessonModal && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+               <div className="bg-white dark:bg-slate-800 w-full max-w-2xl rounded-3xl p-8 max-h-[90vh] overflow-y-auto">
+                    <h2 className="text-2xl font-bold mb-6">Edit Topic Rules</h2>
                     <div className="space-y-6">
-                        <div>
-                            <label className="block text-[10px] font-bold mb-3 text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Select Target Topic</label>
-                            <select 
-                                value={magicLessonId} 
-                                onChange={e => setMagicLessonId(e.target.value)} 
-                                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"
-                            >
-                                <option value="">Select a Topic to optimize...</option>
-                                {lessons.filter(l => l.referenceText).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                            </select>
-                            {lessons.filter(l => l.referenceText).length === 0 && (
-                                <p className="text-xs text-red-500 mt-3 font-bold flex items-center gap-2 bg-red-50 dark:bg-red-900/10 p-3 rounded-lg"><AlertCircle size={14}/> No topics have notes/transcripts to analyze.</p>
-                            )}
-                        </div>
-
-                        {isMagicRunning ? (
-                            <div className="p-10 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border border-indigo-100 dark:border-indigo-900 flex flex-col items-center justify-center gap-6">
-                                <div className="flex gap-4">
-                                    <BarChart3 className={`text-indigo-500 ${magicStep >= 1 ? 'animate-bounce' : 'opacity-20'}`} size={32} />
-                                    <Binary className={`text-indigo-500 ${magicStep >= 2 ? 'animate-pulse' : 'opacity-20'}`} size={32} />
-                                    <Cpu className={`text-indigo-500 ${magicStep >= 3 ? 'animate-spin' : 'opacity-20'}`} size={32} />
-                                </div>
-                                <div className="text-center">
-                                    <p className="font-mono text-xs font-black text-indigo-400 tracking-[0.3em]">
-                                        {magicStep === 1 && "SCANNING LEXICAL NODES"}
-                                        {magicStep === 2 && "PROBABILISTIC CLUSTERING"}
-                                        {magicStep === 3 && "SYNTACTIC TRIGGER MAPPING"}
-                                    </p>
-                                    <div className="w-64 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mt-5 overflow-hidden">
-                                        <div className="h-full bg-indigo-500 transition-all duration-700" style={{ width: `${(magicStep/3)*100}%` }}></div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="p-6 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <p className="text-sm text-slate-500 leading-relaxed italic">
-                                    The AI Rules engine will scan your transcript to propose the best trigger keywords and OCR phrases. Applying these will automatically update your Topic logic and re-tag your entire repository.
-                                </p>
-                            </div>
-                        )}
-
-                        <div className="flex gap-4 mt-8">
-                            <button onClick={() => setShowMagicModal(false)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors">Close</button>
-                            <button onClick={handleMagicAnalyze} disabled={isMagicRunning || !magicLessonId} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-500 font-bold shadow-2xl shadow-indigo-600/30 disabled:opacity-30 flex items-center justify-center gap-2">
-                                {isMagicRunning ? "Analyzing..." : "Analyze Transcript"}
-                            </button>
-                        </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-8 animate-fade-in">
-                        <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-500/30 rounded-2xl flex justify-between items-center">
+                        <input value={lessonName} onChange={e => setLessonName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border" placeholder="Topic Name" />
+                        <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <h3 className="text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase tracking-widest">Proposed Logic Vectors</h3>
-                                <p className="text-[10px] text-emerald-600/70 font-mono">Confidence Coefficient: {(magicResult.confidence * 100).toFixed(1)}%</p>
+                                <label className="text-xs font-bold uppercase text-slate-500 mb-2 block">Keyword Triggers</label>
+                                <input value={keywordInput} onChange={e => setKeywordInput(e.target.value)} onKeyDown={e => {if(e.key === 'Enter'){setLessonKeywords([...lessonKeywords, keywordInput]); setKeywordInput("");}}} className="w-full bg-slate-100 dark:bg-slate-900 p-2 rounded-lg border" placeholder="Enter to add..." />
+                                <div className="flex flex-wrap gap-1 mt-2">{lessonKeywords.map(k => <span className="bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[10px]">{k}</span>)}</div>
                             </div>
-                            <Check className="text-emerald-500" size={24}/>
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-3">Proposed Keywords</label>
-                            <div className="flex flex-wrap gap-2">
-                                {magicResult.triggerKeywords.map(k => <span key={k} className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs rounded-lg font-bold">{k}</span>)}
+                            <div>
+                                <label className="text-xs font-bold uppercase text-slate-500 mb-2 block">OCR Triggers</label>
+                                <input value={phraseInput} onChange={e => setPhraseInput(e.target.value)} onKeyDown={e => {if(e.key === 'Enter'){setLessonOcrPhrases([...lessonOcrPhrases, phraseInput]); setPhraseInput("");}}} className="w-full bg-slate-100 dark:bg-slate-900 p-2 rounded-lg border" placeholder="Enter to add..." />
+                                <div className="flex flex-wrap gap-1 mt-2">{lessonOcrPhrases.map(p => <span className="bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[10px]">{p}</span>)}</div>
                             </div>
                         </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-purple-500 uppercase tracking-widest mb-3">Proposed OCR Triggers</label>
-                            <div className="flex flex-wrap gap-2">
-                                {magicResult.triggerOcrPhrases.map(p => <span key={p} className="px-3 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 text-xs rounded-lg font-bold italic">"{p}"</span>)}
-                            </div>
-                        </div>
-
-                        <div className="flex gap-4 mt-8">
-                            <button onClick={() => setMagicResult(null)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors">Re-run</button>
-                            <button onClick={applyMagicResult} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-500 font-bold shadow-2xl shadow-indigo-600/40">Apply & Re-Sync Repo</button>
-                        </div>
+                        <textarea value={lessonTranscript} onChange={e => setLessonTranscript(e.target.value)} className="w-full h-32 bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border" placeholder="Lesson context..." />
                     </div>
-                  )}
-              </div>
+                    <div className="flex gap-4 mt-8">
+                        <button onClick={() => setShowLessonModal(false)} className="flex-1 py-4 bg-slate-100 dark:bg-slate-700 rounded-xl font-bold">Cancel</button>
+                        <button onClick={handleSaveLesson} className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/20">Save & Reprocess</button>
+                    </div>
+               </div>
           </div>
       )}
 
-      <datalist id="all-keywords">
-          {availableKeywords.map(k => <option key={k} value={k} />)}
-      </datalist>
-      <datalist id="all-topics">
-          {availableTopics.map(t => <option key={t} value={t} />)}
-      </datalist>
+      {/* Magic Analysis Modal placeholder */}
+      {showMagicModal && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl p-8 animate-slide-up">
+                    <h2 className="text-2xl font-bold mb-4">AI Magic Rules</h2>
+                    <select value={magicLessonId} onChange={e => setMagicLessonId(e.target.value)} className="w-full p-4 rounded-xl bg-slate-100 dark:bg-slate-900 border mb-6">
+                        <option value="">Select Topic...</option>
+                        {lessons.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                    <div className="flex gap-4">
+                        <button onClick={() => setShowMagicModal(false)} className="flex-1 py-4 rounded-xl bg-slate-100 dark:bg-slate-700">Close</button>
+                        <button onClick={handleMagicAnalyze} className="flex-1 py-4 rounded-xl bg-indigo-600 text-white">Generate Rules</button>
+                    </div>
+                </div>
+          </div>
+      )}
     </div>
   );
 };

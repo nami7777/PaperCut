@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getQuestionsBySubject, getAllQuestions, getFoldersBySubject } from '../services/db';
-import { ArrowLeft, FileText, FileJson, Download, Loader2, Folder as FolderIcon, CheckSquare, Square, Globe, Layout } from 'lucide-react';
-import { QuestionEntry, Folder } from '../types';
+import { ArrowLeft, FileText, FileJson, Download, Loader2, CheckSquare, Layout, Tag, FileType } from 'lucide-react';
+import { QuestionEntry, Folder, PaperType } from '../types';
 
 declare global {
     interface Window {
@@ -19,8 +19,6 @@ const Export: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
-  
-  // Selection State
   const [exportScope, setExportScope] = useState<'all' | 'folders'>('all');
   const [availableFolders, setAvailableFolders] = useState<Folder[]>([]);
   const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
@@ -39,539 +37,36 @@ const Export: React.FC = () => {
   };
 
   const getQuestions = async () => {
-      // 1. Get Base Questions
       let allQuestions = preSelectedSubject 
         ? await getQuestionsBySubject(preSelectedSubject)
         : await getAllQuestions();
 
-      // 2. Filter if scope is 'folders'
       if (exportScope === 'folders' && selectedFolderIds.size > 0) {
           const activeFolders = availableFolders.filter(f => selectedFolderIds.has(f.id));
           const matchingQuestions = new Map<string, QuestionEntry>();
-          
           activeFolders.forEach(folder => {
               const matches = allQuestions.filter(q => {
-                  const matchesKeyword = folder.filterKeywords.length === 0 || folder.filterKeywords.some(k => q.keywords.includes(k));
+                  if (folder.filterUncategorized) return q.topics.length === 0;
                   const matchesTopic = folder.filterTopics.length === 0 || folder.filterTopics.some(t => q.topics.includes(t));
-                  return matchesKeyword && matchesTopic;
+                  return matchesTopic;
               });
               matches.forEach(q => matchingQuestions.set(q.id, q));
           });
-          
           return Array.from(matchingQuestions.values());
       }
-
       return allQuestions;
   };
 
-  const handleExportJSON = async () => {
-      setLoading(true);
-      setStatusMessage("Generating JSON...");
-      const questions = await getQuestions();
-      const jsonString = JSON.stringify(questions, null, 2);
-      const blob = new Blob([jsonString], { type: "application/json" });
-      downloadBlob(blob, `PaperCut_Export_${Date.now()}.json`);
-      setLoading(false);
-      setStatusMessage("");
-  };
-
-  const handleExportHTML = async () => {
-      setLoading(true);
-      setStatusMessage("Generating Interactive Practice Webpage...");
-      const questions = await getQuestions();
+  const groupQuestionsHierarchically = (qs: QuestionEntry[]) => {
+      const grouped: Record<string, Record<string, QuestionEntry[]>> = {};
       
-      const htmlTemplate = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Practice: ${preSelectedSubject || 'PaperCut Export'}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0f172a; color: white; font-family: sans-serif; }
-        .revealed { display: block !important; }
-        .hidden { display: none; }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-        @keyframes slideUp {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        .animate-slide-up { animation: slideUp 0.3s ease-out; }
-    </style>
-</head>
-<body class="antialiased overflow-x-hidden">
-    <div id="app" class="min-h-screen flex flex-col">
-        <!-- Header -->
-        <div class="sticky top-0 z-50 bg-slate-800 border-b border-slate-700 p-4 shadow-xl">
-            <div class="max-w-4xl mx-auto flex justify-between items-center">
-                <div>
-                    <h1 class="font-bold text-lg text-blue-400">${preSelectedSubject || 'PaperCut'} Practice</h1>
-                    <p id="progress-text" class="text-xs text-slate-400">Loading...</p>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="prevQ()" class="p-2 hover:bg-slate-700 rounded-lg transition-colors">←</button>
-                    <button onclick="nextQ()" class="p-2 hover:bg-slate-700 rounded-lg transition-colors">→</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Content -->
-        <main class="flex-1 p-4 md:p-8 flex justify-center overflow-y-auto">
-            <div id="question-container" class="max-w-3xl w-full space-y-8 pb-32">
-                <!-- Content Injected Here -->
-            </div>
-        </main>
-
-        <!-- Fixed Tagging Footer -->
-        <footer class="fixed bottom-0 left-0 right-0 p-4 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 z-50">
-            <div class="max-w-3xl mx-auto grid grid-cols-3 gap-4">
-                <button onclick="tag('Easy')" class="py-3 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-400 rounded-xl flex flex-col items-center gap-1 font-medium transition-colors">
-                    <span class="text-lg">👍</span> Easy
-                </button>
-                <button onclick="tag('Review')" class="py-3 bg-amber-900/40 hover:bg-amber-900/60 border border-amber-500/30 text-amber-400 rounded-xl flex flex-col items-center gap-1 font-medium transition-colors">
-                    <span class="text-lg">⏰</span> Review
-                </button>
-                <button onclick="tag('Hard')" class="py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 rounded-xl flex flex-col items-center gap-1 font-medium transition-colors">
-                    <span class="text-lg">👎</span> Hard
-                </button>
-            </div>
-        </footer>
-    </div>
-
-    <script id="questions-data" type="application/json">
-        ${JSON.stringify(questions)}
-    </script>
-
-    <script>
-        const questions = JSON.parse(document.getElementById('questions-data').textContent);
-        let currentIndex = 0;
-        const revealedSets = new Set(); // indices of revealed question parts
-
-        function updateUI() {
-            const container = document.getElementById('question-container');
-            const q = questions[currentIndex];
-            const savedStatus = localStorage.getItem('status_' + q.id) || 'Untagged';
-
-            document.getElementById('progress-text').textContent = \`Question \${currentIndex + 1} / \${questions.length}\`;
-
-            let html = \`
-                <div class="bg-slate-800 rounded-xl p-4 flex justify-between items-center border border-slate-700">
-                    <span class="text-sm text-slate-300">\${q.year} \${q.month} • \${q.paperType}</span>
-                    <span class="text-sm font-bold \${savedStatus === 'Easy' ? 'text-emerald-400' : savedStatus === 'Hard' ? 'text-red-400' : 'text-slate-500'}">
-                        \${savedStatus}
-                    </span>
-                </div>
-            \`;
-
-            q.parts.forEach((part, idx) => {
-                const partId = \`\${currentIndex}_\${idx}\`;
-                const isRevealed = revealedSets.has(partId);
-                
-                html += \`
-                    <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg animate-slide-up">
-                        <div class="mb-4 border-b border-slate-700 pb-2 flex justify-between items-center">
-                            <h3 class="font-bold text-blue-400 text-lg">
-                                \${q.parts.length > 1 ? 'Part (' + part.label + ')' : 'Question'}
-                            </h3>
-                        </div>
-                        
-                        <div class="space-y-4 mb-6">
-                            \${(part.questionImages || (part.questionImage ? [part.questionImage] : [])).map(img => 
-                                \`<img src="\${img}" class="max-w-full rounded bg-white p-1" />\`
-                            ).join('')}
-                        </div>
-
-                        <div class="mt-4">
-                            \${!isRevealed ? 
-                                \`<button onclick="reveal('\${partId}')" class="w-full py-3 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 font-medium flex items-center justify-center gap-2 transition-colors">
-                                    👁️ Reveal Answer
-                                </button>\` : 
-                                \`<div class="bg-slate-900/50 rounded-lg p-4 animate-slide-up border border-slate-700">
-                                    <div class="flex justify-between items-center mb-2">
-                                        <span class="text-xs font-bold text-emerald-500 uppercase">Answer</span>
-                                        <button onclick="hide('\${partId}')" class="text-xs text-slate-500 hover:text-white">Hide</button>
-                                    </div>
-                                    \${part.answerText ? \`<div class="text-2xl font-bold text-white mb-2 p-2">\${part.answerText}</div>\` : ''}
-                                    <div class="space-y-4">
-                                        \${(part.answerImages || (part.answerImage ? [part.answerImage] : [])).map(img => 
-                                            \`<img src="\${img}" class="max-w-full rounded bg-white p-1" />\`
-                                        ).join('')}
-                                    </div>
-                                </div>\`
-                            }
-                        </div>
-                    </div>
-                \`;
-            });
-
-            container.innerHTML = html;
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        function reveal(id) { revealedSets.add(id); updateUI(); }
-        function hide(id) { revealedSets.delete(id); updateUI(); }
-        function nextQ() { if(currentIndex < questions.length - 1) { currentIndex++; updateUI(); } }
-        function prevQ() { if(currentIndex > 0) { currentIndex--; updateUI(); } }
-        
-        function tag(status) {
-            const q = questions[currentIndex];
-            localStorage.setItem('status_' + q.id, status);
-            updateUI();
-            setTimeout(nextQ, 300);
-        }
-
-        updateUI();
-    </script>
-</body>
-</html>
-      `;
-
-      const blob = new Blob([htmlTemplate], { type: "text/html" });
-      downloadBlob(blob, `PaperCut_Practice_${preSelectedSubject || 'Export'}_${Date.now()}.html`);
-      setLoading(false);
-      setStatusMessage("");
-  };
-
-  const base64ToBuffer = (base64: string): Uint8Array => {
-    const binaryString = window.atob(base64.split(',')[1]);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-  };
-
-  const getImageDimensions = (base64: string): Promise<{width: number, height: number}> => {
-      return new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({width: img.width, height: img.height});
-          img.onerror = () => resolve({width: 0, height: 0});
-          img.src = base64;
-      });
-  }
-
-  const handleExportWord = async () => {
-    if (!window.docx) {
-        alert("DOCX library not loaded. Please check internet connection.");
-        return;
-    }
-    setLoading(true);
-    setStatusMessage("Generating .docx File...");
-    
-    try {
-        const questions = await getQuestions();
-        const grouped = groupQuestions(questions);
-        const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel, AlignmentType } = window.docx;
-        const children = [];
-
-        children.push(
-            new Paragraph({
-                text: `PaperCut Export: ${preSelectedSubject || 'All Subjects'}`,
-                heading: HeadingLevel.HEADING_1,
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 300 }
-            })
-        );
-
-        for (const paperType of Object.keys(grouped)) {
-            children.push(
-                new Paragraph({
-                    text: paperType,
-                    heading: HeadingLevel.HEADING_2,
-                    spacing: { before: 400, after: 200 }
-                })
-            );
-
-            for (const dateKey of Object.keys(grouped[paperType])) {
-                children.push(
-                    new Paragraph({
-                        text: dateKey,
-                        heading: HeadingLevel.HEADING_3,
-                        spacing: { before: 200, after: 200 },
-                        color: "7F8C8D"
-                    })
-                );
-
-                for (const q of grouped[paperType][dateKey]) {
-                    children.push(
-                        new Paragraph({
-                            children: [
-                                new TextRun({
-                                    text: `Q${q.questionNumber}`,
-                                    bold: true,
-                                    color: "2C3E50"
-                                })
-                            ],
-                            spacing: { before: 400, after: 100 },
-                            border: { top: { color: "EEEEEE", space: 5, value: "single", size: 6 } }
-                        })
-                    );
-
-                    for (const p of q.parts) {
-                        if (q.parts.length > 1) {
-                            children.push(
-                                new Paragraph({
-                                    text: `Part (${p.label})`,
-                                    bold: true,
-                                    spacing: { before: 100, after: 100 }
-                                })
-                            );
-                        }
-
-                        const qImgs = [];
-                        if (p.questionImage) qImgs.push(p.questionImage);
-                        if (p.questionImages) qImgs.push(...p.questionImages);
-
-                        for (const img of qImgs) {
-                            const dims = await getImageDimensions(img);
-                            if (dims.width === 0) continue;
-                            const maxWidth = 550;
-                            let finalWidth = dims.width;
-                            let finalHeight = dims.height;
-                            if (dims.width > maxWidth) {
-                                const scale = maxWidth / dims.width;
-                                finalWidth = maxWidth;
-                                finalHeight = dims.height * scale;
-                            }
-                            children.push(
-                                new Paragraph({
-                                    children: [
-                                        new ImageRun({
-                                            data: base64ToBuffer(img),
-                                            transformation: { width: finalWidth, height: finalHeight },
-                                            type: "png"
-                                        })
-                                    ],
-                                    spacing: { after: 100 }
-                                })
-                            );
-                        }
-                    }
-
-                    children.push(
-                        new Paragraph({
-                            children: [
-                                new TextRun({
-                                    text: "Answer:",
-                                    bold: true,
-                                    color: "27AE60"
-                                })
-                            ],
-                            spacing: { before: 200, after: 100 }
-                        })
-                    );
-
-                    for (const p of q.parts) {
-                        if (p.answerText) {
-                            children.push(
-                                new Paragraph({
-                                    children: [
-                                        new TextRun({
-                                            text: q.parts.length > 1 ? `(${p.label}) ${p.answerText}` : p.answerText,
-                                            bold: true
-                                        })
-                                    ],
-                                    spacing: { after: 100 }
-                                })
-                            );
-                        }
-                        const aImgs = [];
-                        if (p.answerImage) aImgs.push(p.answerImage);
-                        if (p.answerImages) aImgs.push(...p.answerImages);
-                        for (const img of aImgs) {
-                            const dims = await getImageDimensions(img);
-                            if (dims.width === 0) continue;
-                            const maxWidth = 550;
-                            let finalWidth = dims.width;
-                            let finalHeight = dims.height;
-                            if (dims.width > maxWidth) {
-                                const scale = maxWidth / dims.width;
-                                finalWidth = maxWidth;
-                                finalHeight = dims.height * scale;
-                            }
-                            children.push(
-                                new Paragraph({
-                                    children: [
-                                        new ImageRun({
-                                            data: base64ToBuffer(img),
-                                            transformation: { width: finalWidth, height: finalHeight },
-                                            type: "png"
-                                        })
-                                    ],
-                                    spacing: { after: 100 }
-                                })
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        const doc = new Document({
-            sections: [{
-                properties: {},
-                children: children,
-            }],
-        });
-
-        const blob = await Packer.toBlob(doc);
-        downloadBlob(blob, `PaperCut_Export_${Date.now()}.docx`);
-    } catch (e) {
-        console.error(e);
-        alert("Failed to generate Word document.");
-    } finally {
-        setLoading(false);
-        setStatusMessage("");
-    }
-  };
-
-  const optimizeImageForPdf = (base64: string): Promise<{ data: string, width: number, height: number }> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0);
-        }
-        resolve({
-            data: canvas.toDataURL('image/jpeg', 0.9),
-            width: img.width,
-            height: img.height
-        });
-      };
-      img.onerror = () => resolve({ data: '', width: 0, height: 0 });
-    });
-  };
-
-  const handleExportPDF = async () => {
-    if (!window.jspdf) {
-        alert("PDF library not loaded properly.");
-        return;
-    }
-    setLoading(true);
-    setStatusMessage("Preparing images...");
-    try {
-        const questions = await getQuestions();
-        const grouped = groupQuestions(questions);
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        let y = 20;
-        const pageHeight = doc.internal.pageSize.height;
-        const pageWidth = doc.internal.pageSize.width;
-        const margin = 15;
-        const maxContentWidth = pageWidth - (margin * 2);
-        
-        const checkPageBreak = (height: number) => {
-            if (y + height >= pageHeight - margin) {
-                doc.addPage();
-                y = 20;
-                return true;
-            }
-            return false;
-        };
-
-        doc.setFontSize(22);
-        doc.setTextColor(41, 128, 185);
-        doc.text(`PaperCut Export: ${preSelectedSubject || 'All Subjects'}`, margin, y);
-        y += 15;
-
-        for (const paperType of Object.keys(grouped)) {
-            checkPageBreak(20);
-            doc.setFontSize(18);
-            doc.setTextColor(44, 62, 80);
-            doc.text(paperType, margin, y);
-            y += 10;
-            for (const dateKey of Object.keys(grouped[paperType])) {
-                checkPageBreak(15);
-                doc.setFontSize(14);
-                doc.setTextColor(127, 140, 141);
-                doc.text(dateKey, margin, y);
-                y += 10;
-                for (const q of grouped[paperType][dateKey]) {
-                    doc.setFontSize(10);
-                    doc.setTextColor(0, 0, 0);
-                    checkPageBreak(10);
-                    doc.text(`Q${q.questionNumber}`, margin, y);
-                    y += 5;
-                    for (const p of q.parts) {
-                        if (q.parts.length > 1) {
-                            doc.text(`(${p.label})`, margin, y + 5);
-                            y += 5;
-                        }
-                        const qImgs = [];
-                        if (p.questionImage) qImgs.push(p.questionImage);
-                        if (p.questionImages) qImgs.push(...p.questionImages);
-                        for (const img of qImgs) {
-                            const optimized = await optimizeImageForPdf(img);
-                            if (!optimized.data) continue;
-                            const scaleFactor = maxContentWidth / optimized.width;
-                            const finalWidth = maxContentWidth;
-                            const finalHeight = optimized.height * scaleFactor;
-                            checkPageBreak(finalHeight + 10);
-                            try {
-                                doc.addImage(optimized.data, 'JPEG', margin, y, finalWidth, finalHeight, undefined, 'FAST');
-                                y += finalHeight + 5;
-                            } catch(e) {
-                                y += 10;
-                            }
-                        }
-                    }
-                    checkPageBreak(20);
-                    doc.setTextColor(39, 174, 96);
-                    doc.text("Answer:", margin, y);
-                    y += 5;
-                    for (const p of q.parts) {
-                        if (p.answerText) {
-                             checkPageBreak(10);
-                             doc.text(`${p.label ? '(' + p.label + ') ' : ''}${p.answerText}`, margin + 5, y);
-                             y += 5;
-                        }
-                        const aImgs = [];
-                        if (p.answerImage) aImgs.push(p.answerImage);
-                        if (p.answerImages) aImgs.push(...p.answerImages);
-                        for (const img of aImgs) {
-                            const optimized = await optimizeImageForPdf(img);
-                            if (!optimized.data) continue;
-                            const scaleFactor = maxContentWidth / optimized.width;
-                            const finalWidth = maxContentWidth;
-                            const finalHeight = optimized.height * scaleFactor;
-                            checkPageBreak(finalHeight + 5);
-                            try {
-                                doc.addImage(optimized.data, 'JPEG', margin, y, finalWidth, finalHeight, undefined, 'FAST');
-                                y += finalHeight + 5;
-                            } catch (e) { y += 10; }
-                        }
-                    }
-                    y += 10;
-                }
-            }
-        }
-        doc.save(`PaperCut_Export_${Date.now()}.pdf`);
-    } catch (error) {
-        alert("Export failed.");
-    } finally {
-        setLoading(false);
-        setStatusMessage("");
-    }
-  };
-
-  const groupQuestions = (qs: QuestionEntry[]) => {
-      const grouped: any = {};
       const sorted = qs.sort((a, b) => {
+          if (a.paperType !== b.paperType) return a.paperType.localeCompare(b.paperType);
           if (b.year !== a.year) return b.year - a.year;
           if (b.month !== a.month) return b.month.localeCompare(a.month);
           return parseInt(a.questionNumber) - parseInt(b.questionNumber);
       });
+
       sorted.forEach(q => {
           if (!grouped[q.paperType]) grouped[q.paperType] = {};
           const dateKey = `${q.month} ${q.year}`;
@@ -581,126 +76,398 @@ const Export: React.FC = () => {
       return grouped;
   };
 
+  const getImageDims = (src: string): Promise<{w: number, h: number}> => {
+      return new Promise(res => { 
+          const img = new Image(); 
+          img.onload = () => res({w: img.width, h: img.height}); 
+          img.onerror = () => res({w: 100, h: 100});
+          img.src = src; 
+      });
+  };
+
+  const handleExportPDF = async () => {
+    if (!window.jspdf) return;
+    setLoading(true);
+    setStatusMessage("Generating PDF structure...");
+    try {
+        const questions = await getQuestions();
+        const grouped = groupQuestionsHierarchically(questions);
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        let y = 20;
+        const margin = 20;
+        const pageWidth = doc.internal.pageSize.width;
+        const maxW = pageWidth - margin * 2;
+
+        for (const paperType of Object.keys(grouped)) {
+            // Paper Type Heading
+            if (y > 20) { doc.addPage(); y = 20; }
+            doc.setFontSize(22);
+            doc.setTextColor(30, 41, 59);
+            doc.text(paperType, margin, y);
+            y += 15;
+
+            for (const dateKey of Object.keys(grouped[paperType])) {
+                // Year/Month Subheading
+                if (y > 260) { doc.addPage(); y = 20; }
+                doc.setFontSize(16);
+                doc.setTextColor(71, 85, 105);
+                doc.text(dateKey, margin, y);
+                y += 10;
+
+                for (const q of grouped[paperType][dateKey]) {
+                    // Question Info
+                    if (y > 270) { doc.addPage(); y = 20; }
+                    doc.setFontSize(12);
+                    doc.setTextColor(0, 0, 0);
+                    const topicStr = q.topics.length > 0 ? ` [Topics: ${q.topics.join(', ')}]` : '';
+                    doc.text(`Question ${q.questionNumber}${topicStr}`, margin, y);
+                    y += 8;
+
+                    for (const p of q.parts) {
+                        // Question Images
+                        const qImgs = p.questionImages || (p.questionImage ? [p.questionImage] : []);
+                        for (const img of qImgs) {
+                            const dims = await getImageDims(img);
+                            const h = (dims.h * maxW) / dims.w;
+                            if (y + h > 280) { doc.addPage(); y = 20; }
+                            doc.addImage(img, 'PNG', margin, y, maxW, h);
+                            y += h + 5;
+                        }
+
+                        // Answer immediately after
+                        doc.setFontSize(10);
+                        doc.setTextColor(16, 185, 129); // Emerald
+                        if (paperType === PaperType.PAPER_1 && p.answerText) {
+                            if (y > 280) { doc.addPage(); y = 20; }
+                            doc.text(`Answer: ${p.answerText}`, margin, y);
+                            y += 10;
+                        } else {
+                            if (y > 280) { doc.addPage(); y = 20; }
+                            doc.text("ANSWER:", margin, y);
+                            y += 5;
+                            const aImgs = p.answerImages || (p.answerImage ? [p.answerImage] : []);
+                            for (const img of aImgs) {
+                                const dims = await getImageDims(img);
+                                const h = (dims.h * maxW) / dims.w;
+                                if (y + h > 280) { doc.addPage(); y = 20; }
+                                doc.addImage(img, 'PNG', margin, y, maxW, h);
+                                y += h + 5;
+                            }
+                        }
+                        y += 5;
+                    }
+                    y += 10;
+                    doc.setDrawColor(226, 232, 240);
+                    doc.line(margin, y, pageWidth - margin, y);
+                    y += 15;
+                }
+            }
+        }
+        doc.save(`${preSelectedSubject || 'PaperCut'}_Questions.pdf`);
+    } catch (e) {
+        console.error(e);
+        alert("PDF Generation failed.");
+    } finally { setLoading(false); }
+  };
+
+  const handleExportWord = async () => {
+    if (!window.docx) return;
+    setLoading(true);
+    setStatusMessage("Building Word Document...");
+    try {
+        const questions = await getQuestions();
+        const grouped = groupQuestionsHierarchically(questions);
+        const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel, AlignmentType } = window.docx;
+
+        const sections = [];
+
+        for (const paperType of Object.keys(grouped)) {
+            const children: any[] = [
+                new Paragraph({ text: paperType, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } })
+            ];
+
+            for (const dateKey of Object.keys(grouped[paperType])) {
+                children.push(new Paragraph({ text: dateKey, heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 200 } }));
+
+                for (const q of grouped[paperType][dateKey]) {
+                    const topicStr = q.topics.length > 0 ? ` (Topics: ${q.topics.join(', ')})` : '';
+                    children.push(new Paragraph({
+                        children: [new TextRun({ text: `Question ${q.questionNumber}${topicStr}`, bold: true, size: 28 })],
+                        spacing: { before: 200 }
+                    }));
+
+                    for (const p of q.parts) {
+                        const qImgs = p.questionImages || (p.questionImage ? [p.questionImage] : []);
+                        for (const img of qImgs) {
+                            try {
+                                const base64 = img.split(',')[1];
+                                const dims = await getImageDims(img);
+                                children.push(new Paragraph({
+                                    children: [new ImageRun({ data: Uint8Array.from(atob(base64), c => c.charCodeAt(0)), transformation: { width: 500, height: (500 * dims.h) / dims.w } })],
+                                    alignment: AlignmentType.CENTER
+                                }));
+                            } catch (err) {}
+                        }
+
+                        if (paperType === PaperType.PAPER_1 && p.answerText) {
+                            children.push(new Paragraph({
+                                children: [new TextRun({ text: `Answer: ${p.answerText}`, bold: true, color: "10B981" })],
+                                spacing: { before: 100 }
+                            }));
+                        } else {
+                            children.push(new Paragraph({ text: "ANSWER:", spacing: { before: 100 } }));
+                            const aImgs = p.answerImages || (p.answerImage ? [p.answerImage] : []);
+                            for (const img of aImgs) {
+                                try {
+                                    const base64 = img.split(',')[1];
+                                    const dims = await getImageDims(img);
+                                    children.push(new Paragraph({
+                                        children: [new ImageRun({ data: Uint8Array.from(atob(base64), c => c.charCodeAt(0)), transformation: { width: 500, height: (500 * dims.h) / dims.w } })],
+                                        alignment: AlignmentType.CENTER
+                                    }));
+                                } catch (err) {}
+                            }
+                        }
+                    }
+                }
+            }
+            sections.push({ children });
+        }
+
+        const doc = new Document({ sections });
+        const blob = await Packer.toBlob(doc);
+        downloadBlob(blob, `${preSelectedSubject || 'PaperCut'}_Export.docx`);
+    } catch (e) {
+        console.error(e);
+        alert("Word Export failed.");
+    } finally { setLoading(false); }
+  };
+
+  const handleExportHTML = async () => {
+      setLoading(true);
+      setStatusMessage("Generating Interactive HTML...");
+      const questions = await getQuestions();
+      
+      const htmlTemplate = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Repository: ${preSelectedSubject || 'PaperCut'}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { background-color: #0f172a; color: white; font-family: sans-serif; }
+        .tab-active { background-color: #1e293b; color: #60a5fa; border-bottom: 2px solid #3b82f6; }
+        .hidden { display: none; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="app" class="h-screen flex flex-col">
+        <nav class="bg-slate-800 border-b border-slate-700 flex justify-center shrink-0">
+            <button onclick="switchTab('practice')" id="tab-practice" class="px-8 py-4 text-sm font-bold tab-active">Study Mode</button>
+            <button onclick="switchTab('repository')" id="tab-repository" class="px-8 py-4 text-sm font-bold text-slate-400">Browser & Tagging</button>
+        </nav>
+        <main id="content" class="flex-1 overflow-y-auto p-4 md:p-8"></main>
+    </div>
+
+    <script id="questions-data" type="application/json">${JSON.stringify(questions)}</script>
+
+    <script>
+        const questions = JSON.parse(document.getElementById('questions-data').textContent);
+        let currentTab = 'practice';
+        let currentPracticeIndex = 0;
+        const revealedSets = new Set();
+        const selectedForPdf = new Set();
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('tab-active', 'text-slate-400'));
+            document.getElementById('tab-' + tab).classList.add('tab-active');
+            render();
+        }
+
+        function render() {
+            const main = document.getElementById('content');
+            if (currentTab === 'practice') renderPractice(main);
+            else renderRepository(main);
+        }
+
+        function renderPractice(container) {
+            const q = questions[currentPracticeIndex];
+            if (!q) { container.innerHTML = '<div class="text-center py-20">No questions.</div>'; return; }
+            const status = localStorage.getItem('status_' + q.id) || 'Untagged';
+            
+            container.innerHTML = \`
+                <div class="max-w-3xl mx-auto space-y-8 pb-32 animate-fade">
+                    <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex justify-between">
+                        <div>
+                            <div class="text-blue-400 font-bold">\${q.year} \${q.month} • \${q.paperType}</div>
+                            <div class="flex gap-1 mt-2">\${q.topics.map(t => \`<span class="text-[9px] bg-indigo-500/20 text-indigo-400 px-2 rounded-full border border-indigo-500/30 uppercase">\${t}</span>\`).join('')}</div>
+                        </div>
+                        <div class="text-right"><span class="text-xs text-slate-500">\${currentPracticeIndex + 1} / \${questions.length}</span></div>
+                    </div>
+                    \${q.parts.map((p, idx) => \`
+                        <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-xl">
+                            <h3 class="font-bold text-xl mb-4">Part \${p.label}</h3>
+                            \${(p.questionImages || (p.questionImage ? [p.questionImage] : [])).map(img => \`<img src="\${img}" class="max-w-full rounded-xl bg-white p-2 mb-4" />\`).join('')}
+                            <div class="mt-4">\${!revealedSets.has(currentPracticeIndex + '_' + idx) ? 
+                                \`<button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="w-full py-4 bg-slate-700 rounded-xl font-bold">Reveal Answer</button>\` :
+                                \`<div class="bg-slate-900 p-6 rounded-xl border border-emerald-500/30 animate-fade">
+                                    \${p.answerText ? \`<div class="text-3xl font-black mb-4 text-emerald-400">\${p.answerText}</div>\` : ''}
+                                    \${(p.answerImages || (p.answerImage ? [p.answerImage] : [])).map(img => \`<img src="\${img}" class="max-w-full rounded-xl bg-white p-2 mb-4" />\`).join('')}
+                                </div>\`
+                            }</div>
+                        </div>
+                    \`).join('')}
+                    <div class="fixed bottom-0 left-0 right-0 p-6 bg-slate-900/90 backdrop-blur-xl border-t border-slate-700 flex justify-center gap-4">
+                        <button onclick="move(-1)" class="px-6 py-4 bg-slate-800 rounded-xl">Prev</button>
+                        <button onclick="tag('Easy')" class="px-8 py-4 bg-emerald-600 rounded-xl font-bold">Easy</button>
+                        <button onclick="tag('Hard')" class="px-8 py-4 bg-red-600 rounded-xl font-bold">Hard</button>
+                        <button onclick="move(1)" class="px-6 py-4 bg-slate-800 rounded-xl">Next</button>
+                    </div>
+                </div>\`;
+        }
+
+        function renderRepository(container) {
+            container.innerHTML = \`
+                <div class="max-w-6xl mx-auto animate-fade">
+                    <div class="flex justify-between items-center mb-8">
+                        <h2 class="text-3xl font-bold">Repository Browser</h2>
+                        <button onclick="exportPdf()" class="px-6 py-3 bg-blue-600 rounded-xl font-bold">Export Selection to PDF (\${selectedForPdf.size})</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        \${questions.map((q, i) => \`
+                        <div class="bg-slate-800 p-6 rounded-2xl border \${selectedForPdf.has(i) ? 'border-blue-500 ring-2' : 'border-slate-700'} cursor-pointer" onclick="toggleSelect(\${i})">
+                            <div class="flex justify-between items-start mb-4">
+                                <div><h4 class="font-bold">\${q.year} \${q.month}</h4><span class="text-xs text-slate-500">Q\${q.questionNumber} • \${q.paperType}</span></div>
+                                <div class="w-6 h-6 border rounded \${selectedForPdf.has(i) ? 'bg-blue-500' : ''}"></div>
+                            </div>
+                            <img src="\${q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage}" class="w-full h-32 object-contain bg-white rounded-lg p-1 mb-4" />
+                            <div class="flex flex-wrap gap-1 mb-4">\${q.topics.map(t => \`<span class="text-[9px] bg-slate-700 px-1.5 py-0.5 rounded font-black">\${t}</span>\`).join('')}</div>
+                            <div class="flex justify-between items-center pt-4 border-t border-slate-700">
+                                <span class="text-[10px] text-slate-500 uppercase font-bold">\${localStorage.getItem('status_' + q.id) || 'Untagged'}</span>
+                                <button onclick="event.stopPropagation(); currentPracticeIndex=\${i}; switchTab('practice')" class="text-xs text-blue-400">Study →</button>
+                            </div>
+                        </div>\`).join('')}
+                    </div>
+                </div>\`;
+        }
+
+        function togglePart(id) { if(revealedSets.has(id)) revealedSets.delete(id); else revealedSets.add(id); render(); }
+        function move(d) { currentPracticeIndex = Math.max(0, Math.min(questions.length - 1, currentPracticeIndex + d)); revealedSets.clear(); render(); }
+        function tag(s) { localStorage.setItem('status_' + questions[currentPracticeIndex].id, s); move(1); }
+        function toggleSelect(i) { if(selectedForPdf.has(i)) selectedForPdf.delete(i); else selectedForPdf.add(i); render(); }
+
+        async function exportPdf() {
+            if(selectedForPdf.size === 0) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            let y = 20;
+            const margin = 20;
+            const selected = Array.from(selectedForPdf).map(i => questions[i]);
+            for(const q of selected) {
+                if(y > 250) { doc.addPage(); y = 20; }
+                doc.setFontSize(14);
+                doc.text(\`\${q.year} \${q.month} - Q\${q.questionNumber} (\${q.topics.join(', ')})\`, margin, y);
+                y += 10;
+                for(const p of q.parts) {
+                    const imgs = p.questionImages || [p.questionImage];
+                    for(const img of imgs) {
+                        try {
+                            const dims = await getImageDims(img);
+                            const h = (dims.h * 170) / dims.w;
+                            if(y + h > 280) { doc.addPage(); y = 20; }
+                            doc.addImage(img, 'PNG', margin, y, 170, h);
+                            y += h + 10;
+                        } catch(e) {}
+                    }
+                }
+                y += 10;
+            }
+            doc.save('Selected_Questions.pdf');
+        }
+
+        function getImageDims(src) { return new Promise(res => { const img = new Image(); img.onload = () => res({w: img.width, h: img.height}); img.src = src; }); }
+        render();
+    </script>
+</body>
+</html>`;
+
+      const blob = new Blob([htmlTemplate], { type: "text/html" });
+      downloadBlob(blob, `PaperCut_Interactive_${Date.now()}.html`);
+      setLoading(false);
+      setStatusMessage("");
+  };
+
+  const handleExportJSON = async () => {
+      setLoading(true);
+      const questions = await getQuestions();
+      const blob = new Blob([JSON.stringify(questions, null, 2)], { type: "application/json" });
+      downloadBlob(blob, `PaperCut_Backup_${Date.now()}.json`);
+      setLoading(false);
+  };
+
   const downloadBlob = (blob: Blob, filename: string) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
-      document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white p-8 flex items-center justify-center">
-      <div className="max-w-2xl w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
-          
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-8 flex items-center justify-center">
+      <div className="max-w-2xl w-full bg-white dark:bg-slate-800 rounded-3xl shadow-2xl p-8 border border-slate-200 dark:border-slate-700">
           <button onClick={() => navigate(-1)} className="mb-6 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center gap-2">
               <ArrowLeft size={18}/> Back
           </button>
+          <h1 className="text-3xl font-bold mb-2">Export Session</h1>
+          <p className="text-slate-500 mb-8">Generated files include all associated lesson tags and hierarchical grouping.</p>
 
-          <h1 className="text-2xl font-bold mb-2">Export Repository</h1>
-          <p className="text-slate-500 mb-8">Download your extracted questions in your preferred format.</p>
-
-          <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-               <h3 className="font-bold text-sm uppercase text-slate-500 mb-3">Export Scope</h3>
-               <div className="flex gap-4 mb-4">
-                   <button 
-                    onClick={() => setExportScope('all')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${exportScope === 'all' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
-                   >
-                       Entire Repository
-                   </button>
-                   <button 
-                    onClick={() => setExportScope('folders')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${exportScope === 'folders' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
-                   >
-                       Specific Folders
-                   </button>
+          <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
+               <h3 className="font-bold text-xs uppercase text-slate-500 mb-4 tracking-widest">Select Scope</h3>
+               <div className="flex gap-4 mb-6">
+                   <button onClick={() => setExportScope('all')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${exportScope === 'all' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white dark:bg-slate-800 border'}`}>Full Subject</button>
+                   <button onClick={() => setExportScope('folders')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${exportScope === 'folders' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white dark:bg-slate-800 border'}`}>Smart Folders</button>
                </div>
-
                {exportScope === 'folders' && (
-                   <div className="grid grid-cols-2 gap-2 animate-fade-in">
+                   <div className="grid grid-cols-2 gap-2">
                        {availableFolders.map(f => (
-                           <div 
-                             key={f.id} 
-                             onClick={() => toggleFolder(f.id)}
-                             className={`flex items-center gap-2 p-2 rounded cursor-pointer border \${selectedFolderIds.has(f.id) ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-600' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 hover:border-blue-400'}`}
-                           >
-                               {selectedFolderIds.has(f.id) ? <CheckSquare size={18}/> : <Square size={18}/>}
-                               <span className="text-sm truncate">{f.name}</span>
+                           <div key={f.id} onClick={() => toggleFolder(f.id)} className={`flex items-center gap-2 p-3 rounded-xl cursor-pointer border transition-all ${selectedFolderIds.has(f.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-600' : 'bg-white dark:bg-slate-800'}`}>
+                               <CheckSquare size={18} className={selectedFolderIds.has(f.id) ? "text-blue-500" : "text-slate-300"}/> <span className="text-xs font-bold truncate">{f.name}</span>
                            </div>
                        ))}
                    </div>
                )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-              <button 
-                onClick={handleExportHTML}
-                disabled={loading}
-                className="w-full p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 transition-all flex items-center gap-4"
-              >
-                  <div className="p-3 bg-white dark:bg-slate-800 rounded-full text-indigo-600 shadow-sm">
-                      <Layout size={24} />
-                  </div>
-                  <div className="text-left">
-                      <div className="font-bold">Interactive HTML Practice</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">Standalone offline practice website with tagging</div>
-                  </div>
+          <div className="space-y-3">
+              <button onClick={handleExportHTML} disabled={loading} className="w-full p-5 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition-all flex items-center gap-4 group">
+                  <div className="p-3 bg-indigo-600 text-white rounded-xl group-hover:scale-110 transition-transform"><Layout size={24} /></div>
+                  <div className="text-left"><div className="font-bold text-indigo-900 dark:text-indigo-200">Interactive Webapp</div><div className="text-[10px] text-indigo-600/60 uppercase font-black">Browser + Custom PDF Export</div></div>
               </button>
-
-              <button 
-                onClick={handleExportPDF}
-                disabled={loading}
-                className="w-full p-4 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-transparent hover:border-blue-500 transition-all flex items-center gap-4"
-              >
-                  <div className="p-3 bg-white dark:bg-slate-800 rounded-full text-red-500 shadow-sm">
-                      <FileText size={24} />
-                  </div>
-                  <div className="text-left">
-                      <div className="font-bold">PDF Document</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">High Quality • Optimized for printing</div>
-                  </div>
-              </button>
-
-              <button 
-                onClick={handleExportWord}
-                disabled={loading}
-                className="w-full p-4 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-transparent hover:border-blue-500 transition-all flex items-center gap-4"
-              >
-                  <div className="p-3 bg-white dark:bg-slate-800 rounded-full text-blue-600 shadow-sm">
-                      <FileText size={24} />
-                  </div>
-                  <div className="text-left">
-                      <div className="font-bold">Word Document (.docx)</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">Editable document with high-res images</div>
-                  </div>
-              </button>
-
-              <button 
-                onClick={handleExportJSON}
-                disabled={loading}
-                className="w-full p-4 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-transparent hover:border-blue-500 transition-all flex items-center gap-4"
-              >
-                  <div className="p-3 bg-white dark:bg-slate-800 rounded-full text-amber-500 shadow-sm">
-                      <FileJson size={24} />
-                  </div>
-                  <div className="text-left">
-                      <div className="font-bold">JSON Backup</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">For migrating data to another device</div>
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                  <button onClick={handleExportPDF} disabled={loading} className="p-5 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 hover:bg-slate-200 transition-all">
+                      <FileText size={28} className="text-red-500 shrink-0" />
+                      <div className="text-left"><div className="font-bold">PDF</div><div className="text-[10px] text-slate-500 font-bold">Print Optimized</div></div>
+                  </button>
+                  <button onClick={handleExportWord} disabled={loading} className="p-5 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 hover:bg-slate-200 transition-all">
+                      <FileType size={28} className="text-blue-500 shrink-0" />
+                      <div className="text-left"><div className="font-bold">Word</div><div className="text-[10px] text-slate-500 font-bold">Editable .docx</div></div>
+                  </button>
+              </div>
+              <button onClick={handleExportJSON} disabled={loading} className="w-full p-4 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all">
+                  <Download size={20} className="text-amber-500" />
+                  <div className="text-left"><div className="text-sm font-bold">JSON Raw Data</div></div>
               </button>
           </div>
-          
-          {loading && (
-              <div className="mt-6 flex flex-col items-center justify-center gap-2 text-blue-500">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="animate-spin" /> Processing...
-                  </div>
-                  {statusMessage && <p className="text-xs text-slate-400">{statusMessage}</p>}
-              </div>
-          )}
+          {loading && <div className="mt-8 text-center text-blue-500 font-bold flex items-center justify-center gap-3 animate-pulse"><Loader2 className="animate-spin" /> {statusMessage || 'Preparing Export...'}</div>}
       </div>
     </div>
   );

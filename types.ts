@@ -67,6 +67,7 @@ export interface Folder {
   // Folders are "Smart Filters"
   filterKeywords: string[]; 
   filterTopics: string[];
+  filterUncategorized?: boolean; // New: Only include questions with 0 topics
 }
 
 export interface Lesson {

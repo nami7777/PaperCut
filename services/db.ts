@@ -38,20 +38,25 @@ const openDB = (): Promise<IDBDatabase> => {
 
 /**
  * Pure function to map lessons to a question based on rules.
+ * @param prune If true, removes existing tags that match known lesson names before re-applying.
  */
-const mapLessonsToQuestion = (question: QuestionEntry, lessons: Lesson[]): QuestionEntry => {
-  // Use a Set to avoid duplicates, start with existing topics if any
-  const matchedTopics = new Set(question.topics);
+const mapLessonsToQuestion = (question: QuestionEntry, lessons: Lesson[], prune = false): QuestionEntry => {
+  let matchedTopics: Set<string>;
+  
+  if (prune) {
+    const lessonNames = new Set(lessons.map(l => l.name));
+    matchedTopics = new Set(question.topics.filter(t => !lessonNames.has(t)));
+  } else {
+    matchedTopics = new Set(question.topics);
+  }
+
   const cleanOcr = (question.ocrText || "").toLowerCase();
   const questionKws = (question.keywords || []).map(k => k.toLowerCase());
 
   lessons.forEach(lesson => {
-    // 1. Keyword Check: Does any trigger keyword match the question's keywords?
     const hasKeywordMatch = (lesson.triggerKeywords || []).some(tk => 
       questionKws.includes(tk.toLowerCase())
     );
-
-    // 2. OCR Phrase Check: Does the OCR text contain any of the trigger phrases?
     const hasOcrMatch = (lesson.triggerOcrPhrases || []).some(tp => 
       tp.trim() !== "" && cleanOcr.includes(tp.toLowerCase())
     );
@@ -69,10 +74,8 @@ const mapLessonsToQuestion = (question: QuestionEntry, lessons: Lesson[]): Quest
 
 export const applyLessonMappings = async (question: QuestionEntry): Promise<QuestionEntry> => {
   const lessons = await getLessonsBySubject(question.subject);
-  return mapLessonsToQuestion(question, lessons);
+  return mapLessonsToQuestion(question, lessons, false);
 };
-
-// --- Questions ---
 
 export const saveQuestion = async (question: QuestionEntry): Promise<void> => {
   const processed = await applyLessonMappings(question);
@@ -91,7 +94,7 @@ export const bulkSaveQuestions = async (questions: QuestionEntry[]): Promise<voi
   
   const subject = questions[0].subject;
   const lessons = await getLessonsBySubject(subject);
-  const processed = questions.map(q => mapLessonsToQuestion(q, lessons));
+  const processed = questions.map(q => mapLessonsToQuestion(q, lessons, true));
 
   const db = await openDB();
   return new Promise((resolve, reject) => {
