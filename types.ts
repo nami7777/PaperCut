@@ -41,7 +41,7 @@ export interface QuestionEntry {
   id: string;
   createdAt: number;
   keywords: string[];
-  topics: string[]; // Optional topic tag
+  topics: string[]; // Actual tags applied to the question
   ocrText?: string; // Extracted text from question images for search
   
   // Study Mode Data
@@ -67,6 +67,15 @@ export interface Folder {
   // Folders are "Smart Filters"
   filterKeywords: string[]; 
   filterTopics: string[];
+}
+
+export interface Lesson {
+  id: string;
+  name: string;
+  subject: string;
+  triggerKeywords: string[];    // Rule 1: Keywords that trigger this tag
+  triggerOcrPhrases: string[];  // Rule 2: OCR text that triggers this tag
+  referenceText?: string;       // Context for Magic Tag generation
 }
 
 export interface AppState {
