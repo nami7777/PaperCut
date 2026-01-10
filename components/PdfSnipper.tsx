@@ -1,5 +1,6 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Scissors, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Scissors, RotateCcw, ZoomIn, ZoomOut, Keyboard } from 'lucide-react';
 
 // Define types for window.pdfjsLib
 declare global {
@@ -146,7 +147,7 @@ const PdfSnipper: React.FC<PdfSnipperProps> = ({ file, onSnip, label }) => {
     }
   };
 
-  const performSnip = () => {
+  const performSnip = useCallback(() => {
     if (!finalSelection || !canvasRef.current) return;
     
     const sourceCanvas = canvasRef.current;
@@ -174,19 +175,54 @@ const PdfSnipper: React.FC<PdfSnipperProps> = ({ file, onSnip, label }) => {
       if (selectionDivRef.current) selectionDivRef.current.style.display = 'none';
       setIsSnipping(false);
     }
-  };
+  }, [finalSelection, onSnip]);
 
-  const cancelSnip = () => {
+  const cancelSnip = useCallback(() => {
     setFinalSelection(null);
     if (selectionDivRef.current) selectionDivRef.current.style.display = 'none';
     setIsSnipping(false);
-  };
+  }, []);
+
+  // Keyboard Shortcut Handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if user is typing in an input or textarea
+      const target = e.target as HTMLElement;
+      const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInputFocused) return;
+
+      const key = e.key.toLowerCase();
+      
+      if (key === 'd') {
+        if (!isSnipping) {
+          setIsSnipping(true);
+        } else if (finalSelection) {
+          performSnip();
+        }
+      } else if (key === 't') {
+        // 't' forces a start or restart
+        setFinalSelection(null);
+        if (selectionDivRef.current) selectionDivRef.current.style.display = 'none';
+        setIsSnipping(true);
+      } else if (e.key === 'Escape' && isSnipping) {
+        cancelSnip();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSnipping, finalSelection, performSnip, cancelSnip]);
 
   return (
     <div className="flex flex-col h-full bg-slate-800 rounded-lg overflow-hidden border border-slate-700 shadow-xl select-none">
       {/* Toolbar */}
       <div className="flex items-center justify-between p-3 bg-slate-900 border-b border-slate-700 shrink-0">
-        <h3 className="font-semibold text-slate-200">{label}</h3>
+        <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-200">{label}</h3>
+            <div className="hidden md:flex items-center gap-1.5 px-2 py-0.5 bg-slate-800 rounded border border-slate-700 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                <Keyboard size={10} /> [D] Start/Confirm • [T] Restart
+            </div>
+        </div>
         
         <div className="flex items-center gap-2">
           <button 
@@ -230,13 +266,15 @@ const PdfSnipper: React.FC<PdfSnipperProps> = ({ file, onSnip, label }) => {
                <button 
                  onClick={performSnip}
                  disabled={!finalSelection}
-                 className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                 className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm border border-emerald-500/50"
+                 title="Press 'D' to confirm"
                >
-                 <Scissors size={16} /> Confirm
+                 <Scissors size={16} /> Confirm [D]
                </button>
                <button 
                  onClick={cancelSnip}
                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+                 title="Cancel (Esc)"
                >
                  <RotateCcw size={18} />
                </button>
@@ -245,8 +283,9 @@ const PdfSnipper: React.FC<PdfSnipperProps> = ({ file, onSnip, label }) => {
              <button 
                onClick={() => setIsSnipping(true)}
                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors shadow-sm"
+               title="Press 'D' or 'T' to start"
              >
-               <Scissors size={16} /> Snip
+               <Scissors size={16} /> Snip [D]
              </button>
            )}
         </div>
