@@ -45,6 +45,7 @@ const mapLessonsToQuestion = (question: QuestionEntry, lessons: Lesson[], prune 
   
   if (prune) {
     const lessonNames = new Set(lessons.map(l => l.name));
+    // Keep tags that AREN'T the names of lessons (manual tags)
     matchedTopics = new Set(question.topics.filter(t => !lessonNames.has(t)));
   } else {
     matchedTopics = new Set(question.topics);

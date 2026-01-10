@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getQuestionsBySubject, getAllQuestions, getFoldersBySubject } from '../services/db';
-import { ArrowLeft, FileText, FileJson, Download, Loader2, CheckSquare, Layout, Tag, FileType } from 'lucide-react';
+import { ArrowLeft, FileText, FileJson, Download, Loader2, CheckSquare, Layout, Tag, FileType, RefreshCw } from 'lucide-react';
 import { QuestionEntry, Folder, PaperType } from '../types';
 
 declare global {
@@ -100,7 +100,7 @@ const Export: React.FC = () => {
         const maxW = pageWidth - margin * 2;
 
         for (const paperType of Object.keys(grouped)) {
-            // Paper Type Heading
+            // Paper Type Heading (Heading 1)
             if (y > 20) { doc.addPage(); y = 20; }
             doc.setFontSize(22);
             doc.setTextColor(30, 41, 59);
@@ -108,7 +108,7 @@ const Export: React.FC = () => {
             y += 15;
 
             for (const dateKey of Object.keys(grouped[paperType])) {
-                // Year/Month Subheading
+                // Year/Month Subheading (Heading 2)
                 if (y > 260) { doc.addPage(); y = 20; }
                 doc.setFontSize(16);
                 doc.setTextColor(71, 85, 105);
@@ -135,7 +135,7 @@ const Export: React.FC = () => {
                             y += h + 5;
                         }
 
-                        // Answer immediately after
+                        // Answer Logic
                         doc.setFontSize(10);
                         doc.setTextColor(16, 185, 129); // Emerald
                         if (paperType === PaperType.PAPER_1 && p.answerText) {
@@ -216,7 +216,10 @@ const Export: React.FC = () => {
                                 spacing: { before: 100 }
                             }));
                         } else {
-                            children.push(new Paragraph({ text: "ANSWER:", spacing: { before: 100 } }));
+                            children.push(new Paragraph({ 
+                                children: [new TextRun({ text: "ANSWER:", bold: true })], 
+                                spacing: { before: 100 } 
+                            }));
                             const aImgs = p.answerImages || (p.answerImage ? [p.answerImage] : []);
                             for (const img of aImgs) {
                                 try {
@@ -246,7 +249,7 @@ const Export: React.FC = () => {
 
   const handleExportHTML = async () => {
       setLoading(true);
-      setStatusMessage("Generating Interactive HTML...");
+      setStatusMessage("Generating Interactive HTML App...");
       const questions = await getQuestions();
       
       const htmlTemplate = `
@@ -269,8 +272,8 @@ const Export: React.FC = () => {
 <body class="antialiased">
     <div id="app" class="h-screen flex flex-col">
         <nav class="bg-slate-800 border-b border-slate-700 flex justify-center shrink-0">
-            <button onclick="switchTab('practice')" id="tab-practice" class="px-8 py-4 text-sm font-bold tab-active">Study Mode</button>
-            <button onclick="switchTab('repository')" id="tab-repository" class="px-8 py-4 text-sm font-bold text-slate-400">Browser & Tagging</button>
+            <button onclick="switchTab('practice')" id="tab-practice" class="px-8 py-4 text-sm font-bold tab-active">Practice Mode</button>
+            <button onclick="switchTab('repository')" id="tab-repository" class="px-8 py-4 text-sm font-bold text-slate-400">Browser & Actions</button>
         </nav>
         <main id="content" class="flex-1 overflow-y-auto p-4 md:p-8"></main>
     </div>
@@ -299,36 +302,34 @@ const Export: React.FC = () => {
 
         function renderPractice(container) {
             const q = questions[currentPracticeIndex];
-            if (!q) { container.innerHTML = '<div class="text-center py-20">No questions.</div>'; return; }
-            const status = localStorage.getItem('status_' + q.id) || 'Untagged';
+            if (!q) { container.innerHTML = '<div class="text-center py-20">No questions in this selection.</div>'; return; }
             
             container.innerHTML = \`
                 <div class="max-w-3xl mx-auto space-y-8 pb-32 animate-fade">
                     <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex justify-between">
                         <div>
                             <div class="text-blue-400 font-bold">\${q.year} \${q.month} • \${q.paperType}</div>
-                            <div class="flex gap-1 mt-2">\${q.topics.map(t => \`<span class="text-[9px] bg-indigo-500/20 text-indigo-400 px-2 rounded-full border border-indigo-500/30 uppercase">\${t}</span>\`).join('')}</div>
+                            <div class="flex gap-1 mt-2">\${q.topics.map(t => \`<span class="text-[9px] bg-indigo-500/20 text-indigo-400 px-2 rounded-full border border-indigo-500/30 uppercase font-black">\${t}</span>\`).join('')}</div>
                         </div>
-                        <div class="text-right"><span class="text-xs text-slate-500">\${currentPracticeIndex + 1} / \${questions.length}</span></div>
+                        <div class="text-right"><span class="text-xs text-slate-500 font-bold">\${currentPracticeIndex + 1} / \${questions.length}</span></div>
                     </div>
                     \${q.parts.map((p, idx) => \`
                         <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-xl">
-                            <h3 class="font-bold text-xl mb-4">Part \${p.label}</h3>
+                            <h3 class="font-bold text-xl mb-4 text-slate-300">Question \${p.label}</h3>
                             \${(p.questionImages || (p.questionImage ? [p.questionImage] : [])).map(img => \`<img src="\${img}" class="max-w-full rounded-xl bg-white p-2 mb-4" />\`).join('')}
                             <div class="mt-4">\${!revealedSets.has(currentPracticeIndex + '_' + idx) ? 
-                                \`<button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="w-full py-4 bg-slate-700 rounded-xl font-bold">Reveal Answer</button>\` :
+                                \`<button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="w-full py-4 bg-slate-700 rounded-xl font-bold border border-slate-600 hover:bg-slate-600">👁️ Reveal Solution</button>\` :
                                 \`<div class="bg-slate-900 p-6 rounded-xl border border-emerald-500/30 animate-fade">
-                                    \${p.answerText ? \`<div class="text-3xl font-black mb-4 text-emerald-400">\${p.answerText}</div>\` : ''}
+                                    <div class="flex justify-between items-center mb-4"><span class="text-xs text-emerald-500 font-bold uppercase tracking-widest">Answer Key</span><button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="text-slate-500 text-xs">Hide</button></div>
+                                    \${p.answerText ? \`<div class="text-4xl font-black mb-4 text-emerald-400">\${p.answerText}</div>\` : ''}
                                     \${(p.answerImages || (p.answerImage ? [p.answerImage] : [])).map(img => \`<img src="\${img}" class="max-w-full rounded-xl bg-white p-2 mb-4" />\`).join('')}
                                 </div>\`
                             }</div>
                         </div>
                     \`).join('')}
                     <div class="fixed bottom-0 left-0 right-0 p-6 bg-slate-900/90 backdrop-blur-xl border-t border-slate-700 flex justify-center gap-4">
-                        <button onclick="move(-1)" class="px-6 py-4 bg-slate-800 rounded-xl">Prev</button>
-                        <button onclick="tag('Easy')" class="px-8 py-4 bg-emerald-600 rounded-xl font-bold">Easy</button>
-                        <button onclick="tag('Hard')" class="px-8 py-4 bg-red-600 rounded-xl font-bold">Hard</button>
-                        <button onclick="move(1)" class="px-6 py-4 bg-slate-800 rounded-xl">Next</button>
+                        <button onclick="move(-1)" class="px-8 py-4 bg-slate-800 rounded-xl font-bold">Previous</button>
+                        <button onclick="move(1)" class="px-8 py-4 bg-blue-600 rounded-xl font-bold">Next Question</button>
                     </div>
                 </div>\`;
         }
@@ -336,22 +337,25 @@ const Export: React.FC = () => {
         function renderRepository(container) {
             container.innerHTML = \`
                 <div class="max-w-6xl mx-auto animate-fade">
-                    <div class="flex justify-between items-center mb-8">
-                        <h2 class="text-3xl font-bold">Repository Browser</h2>
-                        <button onclick="exportPdf()" class="px-6 py-3 bg-blue-600 rounded-xl font-bold">Export Selection to PDF (\${selectedForPdf.size})</button>
+                    <div class="flex justify-between items-center mb-8 bg-slate-800 p-6 rounded-2xl border border-slate-700">
+                        <div>
+                            <h2 class="text-3xl font-bold">Browser & Repository</h2>
+                            <p class="text-slate-400 text-sm mt-1">Select questions to generate a custom PDF pack.</p>
+                        </div>
+                        <button onclick="exportPdf()" class="px-8 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold shadow-2xl shadow-blue-500/20 transition-all">Export Selection to PDF (\${selectedForPdf.size})</button>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         \${questions.map((q, i) => \`
-                        <div class="bg-slate-800 p-6 rounded-2xl border \${selectedForPdf.has(i) ? 'border-blue-500 ring-2' : 'border-slate-700'} cursor-pointer" onclick="toggleSelect(\${i})">
+                        <div class="bg-slate-800 p-6 rounded-2xl border \${selectedForPdf.has(i) ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-slate-700'} cursor-pointer hover:border-blue-400 transition-all" onclick="toggleSelect(\${i})">
                             <div class="flex justify-between items-start mb-4">
-                                <div><h4 class="font-bold">\${q.year} \${q.month}</h4><span class="text-xs text-slate-500">Q\${q.questionNumber} • \${q.paperType}</span></div>
-                                <div class="w-6 h-6 border rounded \${selectedForPdf.has(i) ? 'bg-blue-500' : ''}"></div>
+                                <div><h4 class="font-bold text-lg text-slate-200">\${q.year} \${q.month}</h4><span class="text-xs text-slate-500 font-bold uppercase tracking-widest">Q\${q.questionNumber} • \${q.paperType}</span></div>
+                                <div class="w-8 h-8 border-2 rounded-xl flex items-center justify-center transition-all \${selectedForPdf.has(i) ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-600 text-transparent'}">✓</div>
                             </div>
-                            <img src="\${q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage}" class="w-full h-32 object-contain bg-white rounded-lg p-1 mb-4" />
-                            <div class="flex flex-wrap gap-1 mb-4">\${q.topics.map(t => \`<span class="text-[9px] bg-slate-700 px-1.5 py-0.5 rounded font-black">\${t}</span>\`).join('')}</div>
+                            <div class="h-40 bg-white rounded-xl mb-4 overflow-hidden flex items-center justify-center p-2"><img src="\${q.parts[0]?.questionImages?.[0] || q.parts[0]?.questionImage}" class="max-w-full max-h-full object-contain" /></div>
+                            <div class="flex flex-wrap gap-1 mb-6">\${q.topics.map(t => \`<span class="text-[9px] bg-slate-900 px-2 py-1 rounded-full border border-slate-700 uppercase font-black tracking-tight text-slate-400">\${t}</span>\`).join('')}</div>
                             <div class="flex justify-between items-center pt-4 border-t border-slate-700">
-                                <span class="text-[10px] text-slate-500 uppercase font-bold">\${localStorage.getItem('status_' + q.id) || 'Untagged'}</span>
-                                <button onclick="event.stopPropagation(); currentPracticeIndex=\${i}; switchTab('practice')" class="text-xs text-blue-400">Study →</button>
+                                <span class="text-[10px] text-slate-500 uppercase font-bold tracking-widest">\${localStorage.getItem('status_' + q.id) || 'Not Attempted'}</span>
+                                <button onclick="event.stopPropagation(); currentPracticeIndex=\${i}; switchTab('practice')" class="text-xs text-blue-400 font-bold hover:underline">Launch Practice →</button>
                             </div>
                         </div>\`).join('')}
                     </div>
@@ -360,19 +364,24 @@ const Export: React.FC = () => {
 
         function togglePart(id) { if(revealedSets.has(id)) revealedSets.delete(id); else revealedSets.add(id); render(); }
         function move(d) { currentPracticeIndex = Math.max(0, Math.min(questions.length - 1, currentPracticeIndex + d)); revealedSets.clear(); render(); }
-        function tag(s) { localStorage.setItem('status_' + questions[currentPracticeIndex].id, s); move(1); }
         function toggleSelect(i) { if(selectedForPdf.has(i)) selectedForPdf.delete(i); else selectedForPdf.add(i); render(); }
 
         async function exportPdf() {
-            if(selectedForPdf.size === 0) return;
+            if(selectedForPdf.size === 0) { alert('Select at least one question from the browser.'); return; }
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             let y = 20;
             const margin = 20;
             const selected = Array.from(selectedForPdf).map(i => questions[i]);
+            
+            doc.setFontSize(22);
+            doc.text('Custom Question Selection', margin, y);
+            y += 20;
+
             for(const q of selected) {
                 if(y > 250) { doc.addPage(); y = 20; }
                 doc.setFontSize(14);
+                doc.setTextColor(50, 50, 50);
                 doc.text(\`\${q.year} \${q.month} - Q\${q.questionNumber} (\${q.topics.join(', ')})\`, margin, y);
                 y += 10;
                 for(const p of q.parts) {
@@ -389,7 +398,7 @@ const Export: React.FC = () => {
                 }
                 y += 10;
             }
-            doc.save('Selected_Questions.pdf');
+            doc.save('Custom_Question_Pack.pdf');
         }
 
         function getImageDims(src) { return new Promise(res => { const img = new Image(); img.onload = () => res({w: img.width, h: img.height}); img.src = src; }); }
@@ -399,7 +408,7 @@ const Export: React.FC = () => {
 </html>`;
 
       const blob = new Blob([htmlTemplate], { type: "text/html" });
-      downloadBlob(blob, `PaperCut_Interactive_${Date.now()}.html`);
+      downloadBlob(blob, `PaperCut_Interactive_Session_${Date.now()}.html`);
       setLoading(false);
       setStatusMessage("");
   };
@@ -428,7 +437,7 @@ const Export: React.FC = () => {
               <ArrowLeft size={18}/> Back
           </button>
           <h1 className="text-3xl font-bold mb-2">Export Session</h1>
-          <p className="text-slate-500 mb-8">Generated files include all associated lesson tags and hierarchical grouping.</p>
+          <p className="text-slate-500 mb-8">Export with hierarchical Paper & Date subheadings.</p>
 
           <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
                <h3 className="font-bold text-xs uppercase text-slate-500 mb-4 tracking-widest">Select Scope</h3>
@@ -450,24 +459,24 @@ const Export: React.FC = () => {
           <div className="space-y-3">
               <button onClick={handleExportHTML} disabled={loading} className="w-full p-5 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition-all flex items-center gap-4 group">
                   <div className="p-3 bg-indigo-600 text-white rounded-xl group-hover:scale-110 transition-transform"><Layout size={24} /></div>
-                  <div className="text-left"><div className="font-bold text-indigo-900 dark:text-indigo-200">Interactive Webapp</div><div className="text-[10px] text-indigo-600/60 uppercase font-black">Browser + Custom PDF Export</div></div>
+                  <div className="text-left"><div className="font-bold text-indigo-900 dark:text-indigo-200">Interactive HTML Pack</div><div className="text-[10px] text-indigo-600/60 uppercase font-black tracking-widest">Standalone Browser + PDF Export</div></div>
               </button>
               <div className="grid grid-cols-2 gap-3">
                   <button onClick={handleExportPDF} disabled={loading} className="p-5 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 hover:bg-slate-200 transition-all">
                       <FileText size={28} className="text-red-500 shrink-0" />
-                      <div className="text-left"><div className="font-bold">PDF</div><div className="text-[10px] text-slate-500 font-bold">Print Optimized</div></div>
+                      <div className="text-left"><div className="font-bold">PDF Doc</div><div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Paper Hierachy</div></div>
                   </button>
                   <button onClick={handleExportWord} disabled={loading} className="p-5 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 hover:bg-slate-200 transition-all">
                       <FileType size={28} className="text-blue-500 shrink-0" />
-                      <div className="text-left"><div className="font-bold">Word</div><div className="text-[10px] text-slate-500 font-bold">Editable .docx</div></div>
+                      <div className="text-left"><div className="font-bold">Word .docx</div><div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Full Restore</div></div>
                   </button>
               </div>
               <button onClick={handleExportJSON} disabled={loading} className="w-full p-4 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all">
                   <Download size={20} className="text-amber-500" />
-                  <div className="text-left"><div className="text-sm font-bold">JSON Raw Data</div></div>
+                  <div className="text-left"><div className="text-sm font-bold">JSON Backup</div></div>
               </button>
           </div>
-          {loading && <div className="mt-8 text-center text-blue-500 font-bold flex items-center justify-center gap-3 animate-pulse"><Loader2 className="animate-spin" /> {statusMessage || 'Preparing Export...'}</div>}
+          {loading && <div className="mt-8 text-center text-blue-500 font-bold flex items-center justify-center gap-3 animate-pulse"><RefreshCw className="animate-spin" /> {statusMessage || 'Preparing Export...'}</div>}
       </div>
     </div>
   );
