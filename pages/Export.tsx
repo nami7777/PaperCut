@@ -493,7 +493,7 @@ const Export: React.FC = () => {
               <ArrowLeft size={18}/> Back
           </button>
           <h1 className="text-3xl font-bold mb-2">Export Session</h1>
-          <p className="text-slate-500 mb-8 font-medium">Export structure: Paper Type > Date > Question > Answer.</p>
+          <p className="text-slate-500 mb-8 font-medium">Export structure: Paper Type, Date, Question, Answer.</p>
 
           <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
                <h3 className="font-bold text-xs uppercase text-slate-500 mb-4 tracking-widest">Select Scope</h3>
