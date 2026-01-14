@@ -13,7 +13,8 @@ import {
   getLessonsBySubject,
   saveLesson,
   deleteLesson,
-  reprocessSubjectMapping
+  reprocessSubjectMapping,
+  updateQuestionMetadata
 } from '../services/db';
 import { extractTriggersLocally, simulateNlpProcessing, MagicAnalysisResult } from '../services/nlp';
 import { 
@@ -21,7 +22,7 @@ import {
   Trash2, Play, Download, Edit2, 
   Check, X, Zap, Info,
   Filter, Target, AlertCircle, RefreshCw,
-  ChevronUp, ChevronDown, FileQuestion, ScanText
+  ChevronUp, ChevronDown, FileQuestion, ScanText, Tag
 } from 'lucide-react';
 
 const SubjectDashboard: React.FC = () => {
@@ -44,7 +45,7 @@ const SubjectDashboard: React.FC = () => {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
 
   const [folderName, setFolderName] = useState("");
-  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [selectedTopicsForFolder, setSelectedTopicsForFolder] = useState<string[]>([]);
   const [filterUncategorized, setFilterUncategorized] = useState(false);
   
   const [lessonName, setLessonName] = useState("");
@@ -86,6 +87,12 @@ const SubjectDashboard: React.FC = () => {
     setAvailableKeywords(kw);
     setAvailableTopics(tp);
   };
+
+  const allPossibleTopics = useMemo(() => {
+    const lessonNames = lessons.map(l => l.name);
+    const uniqueTags = availableTopics;
+    return Array.from(new Set([...lessonNames, ...uniqueTags])).sort();
+  }, [lessons, availableTopics]);
 
   const handleSyncAll = async () => {
       setIsSyncing(true);
@@ -136,6 +143,22 @@ const SubjectDashboard: React.FC = () => {
     await loadMetadata();
   };
 
+  const openNewFolder = () => {
+    setEditingFolderId(null);
+    setFolderName("");
+    setSelectedTopicsForFolder([]);
+    setFilterUncategorized(false);
+    setShowFolderModal(true);
+  };
+
+  const openEditFolder = (f: Folder) => {
+    setEditingFolderId(f.id);
+    setFolderName(f.name);
+    setSelectedTopicsForFolder(f.filterTopics || []);
+    setFilterUncategorized(!!f.filterUncategorized);
+    setShowFolderModal(true);
+  };
+
   const handleSaveFolder = async () => {
     if (!folderName.trim()) return;
     const folder: Folder = {
@@ -143,12 +166,27 @@ const SubjectDashboard: React.FC = () => {
       name: folderName,
       subject: subject,
       filterKeywords: [],
-      filterTopics: selectedTopics,
+      filterTopics: selectedTopicsForFolder,
       filterUncategorized: filterUncategorized
     };
     await saveFolder(folder);
     setShowFolderModal(false);
     loadData();
+  };
+
+  const handleTagQuestion = async (qId: string, topicName: string) => {
+    const q = questions.find(item => item.id === qId);
+    if (!q) return;
+    
+    let newTopics = [...q.topics];
+    if (newTopics.includes(topicName)) {
+        newTopics = newTopics.filter(t => t !== topicName);
+    } else {
+        newTopics.push(topicName);
+    }
+    
+    await updateQuestionMetadata(qId, { topics: newTopics });
+    loadData(); // Refresh local list
   };
 
   const handleMagicAnalyze = async () => {
@@ -180,12 +218,6 @@ const SubjectDashboard: React.FC = () => {
     loadData();
     alert("AI rules applied to the topic.");
   };
-
-  const allPossibleTopics = useMemo(() => {
-    const lessonNames = lessons.map(l => l.name);
-    const uniqueTags = availableTopics;
-    return Array.from(new Set([...lessonNames, ...uniqueTags])).sort();
-  }, [lessons, availableTopics]);
 
   const getFilteredQuestions = (folder?: Folder) => {
     let qs = questions;
@@ -347,6 +379,28 @@ const SubjectDashboard: React.FC = () => {
                       
                       {isExpanded && (
                          <div className="p-10 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-700 space-y-16 animate-fade-in shadow-inner">
+                            {/* Manage Tags Section */}
+                            <div className="bg-white dark:bg-slate-800/50 p-8 rounded-3xl border border-blue-200 dark:border-blue-900 shadow-sm">
+                                <div className="flex items-center gap-3 mb-6 text-blue-600 dark:text-blue-400 font-black uppercase text-[11px] tracking-widest">
+                                    <Tag size={18}/> Manage Tags & Lessons
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {allPossibleTopics.map(topic => {
+                                        const isActive = q.topics.includes(topic);
+                                        return (
+                                            <button 
+                                                key={topic} 
+                                                onClick={() => handleTagQuestion(q.id, topic)}
+                                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 ${isActive ? 'bg-blue-600 text-white border-blue-500 shadow-lg' : 'bg-slate-100 dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-blue-400'}`}
+                                            >
+                                                {isActive ? <Check size={14}/> : <Plus size={14}/>}
+                                                {topic}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
                             {q.ocrText && (
                                 <div className="bg-white dark:bg-slate-800/50 p-8 rounded-3xl border border-slate-200 dark:border-slate-700">
                                     <div className="flex items-center gap-3 mb-4 text-slate-400 font-black uppercase text-[11px] tracking-widest">
@@ -399,7 +453,7 @@ const SubjectDashboard: React.FC = () => {
 
          {activeTab === 'folders' && (
            <div className="animate-fade-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              <button onClick={() => setShowFolderModal(true)} className="p-10 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-[2.5rem] text-slate-500 hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex flex-col items-center justify-center gap-4">
+              <button onClick={openNewFolder} className="p-10 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-[2.5rem] text-slate-500 hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all flex flex-col items-center justify-center gap-4">
                  <Plus size={48} />
                  <span className="font-black text-lg uppercase tracking-widest">New Smart Folder</span>
               </button>
@@ -410,7 +464,7 @@ const SubjectDashboard: React.FC = () => {
                             {folder.filterUncategorized ? <AlertCircle size={32} /> : <FolderIcon size={32} />}
                         </div>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                           <button onClick={() => setViewingFolder(folder)} className="text-slate-400 hover:text-blue-500 p-2.5 transition-colors"><Info size={20}/></button>
+                           <button onClick={() => openEditFolder(folder)} className="text-slate-400 hover:text-blue-500 p-2.5 transition-colors"><Edit2 size={20}/></button>
                            <button onClick={() => { if(confirm("Delete folder?")) deleteFolder(folder.id).then(loadData); }} className="text-slate-400 hover:text-red-500 p-2.5 transition-colors"><Trash2 size={20}/></button>
                         </div>
                     </div>
@@ -430,7 +484,7 @@ const SubjectDashboard: React.FC = () => {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-md">
            <div className="bg-white dark:bg-slate-800 w-full max-w-3xl rounded-[2.5rem] p-10 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700 shadow-2xl animate-slide-up">
               <div className="flex justify-between items-center mb-10">
-                <h2 className="text-3xl font-black tracking-tighter uppercase">Rule Builder</h2>
+                <h2 className="text-3xl font-black tracking-tighter uppercase">{editingLessonId ? 'Edit Rule' : 'Rule Builder'}</h2>
                 <button onClick={() => setShowLessonModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X size={24}/></button>
               </div>
               
@@ -445,7 +499,7 @@ const SubjectDashboard: React.FC = () => {
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Keyword Triggers</label>
                         <div className="flex gap-2">
                             <input value={keywordInput} onChange={e => setKeywordInput(e.target.value)} onKeyDown={e => { if(e.key==='Enter') { setLessonKeywords([...lessonKeywords, keywordInput]); setKeywordInput(""); } }} className="flex-1 bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold text-sm" placeholder="Add word..." />
-                            <button onClick={() => { setLessonKeywords([...lessonKeywords, keywordInput]); setKeywordInput(""); }} className="p-4 bg-blue-600 text-white rounded-xl"><Plus size={18}/></button>
+                            <button onClick={() => { if(keywordInput.trim()){ setLessonKeywords([...lessonKeywords, keywordInput.trim()]); setKeywordInput(""); } }} className="p-4 bg-blue-600 text-white rounded-xl"><Plus size={18}/></button>
                         </div>
                         <div className="flex flex-wrap gap-2 pt-2">
                            {lessonKeywords.map((k, i) => <span key={i} className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center gap-2">{k} <button onClick={() => setLessonKeywords(lessonKeywords.filter((_, idx) => idx !== i))}><X size={12}/></button></span>)}
@@ -455,7 +509,7 @@ const SubjectDashboard: React.FC = () => {
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">OCR Phrase Triggers</label>
                         <div className="flex gap-2">
                             <input value={phraseInput} onChange={e => setPhraseInput(e.target.value)} onKeyDown={e => { if(e.key==='Enter') { setLessonOcrPhrases([...lessonOcrPhrases, phraseInput]); setPhraseInput(""); } }} className="flex-1 bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold text-sm" placeholder="Add phrase..." />
-                            <button onClick={() => { setLessonOcrPhrases([...lessonOcrPhrases, phraseInput]); setPhraseInput(""); }} className="p-4 bg-blue-600 text-white rounded-xl"><Plus size={18}/></button>
+                            <button onClick={() => { if(phraseInput.trim()){ setLessonOcrPhrases([...lessonOcrPhrases, phraseInput.trim()]); setPhraseInput(""); } }} className="p-4 bg-blue-600 text-white rounded-xl"><Plus size={18}/></button>
                         </div>
                         <div className="flex flex-wrap gap-2 pt-2">
                            {lessonOcrPhrases.map((p, i) => <span key={i} className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center gap-2">{p} <button onClick={() => setLessonOcrPhrases(lessonOcrPhrases.filter((_, idx) => idx !== i))}><X size={12}/></button></span>)}
@@ -524,27 +578,54 @@ const SubjectDashboard: React.FC = () => {
           </div>
       )}
 
-      {/* Smart Folder Modal */}
+      {/* Smart Folder Modal (NOW WITH TOPIC FILTERING) */}
       {showFolderModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-             <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-700 shadow-2xl">
-                <h2 className="text-2xl font-black mb-10 uppercase tracking-tighter">New Smart Folder</h2>
+             <div className="bg-white dark:bg-slate-800 w-full max-w-xl rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-auto max-h-[90vh]">
+                <h2 className="text-2xl font-black mb-10 uppercase tracking-tighter">{editingFolderId ? 'Edit Smart Folder' : 'New Smart Folder'}</h2>
                 <div className="space-y-8">
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Folder Name</label>
                     <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 border-2 border-transparent focus:border-blue-500 p-5 rounded-2xl outline-none font-bold transition-all" placeholder="e.g. Unit 3 Revision" />
                   </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Filter by Topics</label>
+                    <div className="flex flex-wrap gap-2 p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl min-h-[100px] border border-slate-200 dark:border-slate-800">
+                        {allPossibleTopics.length === 0 ? (
+                            <span className="text-xs text-slate-500 italic">No topics created yet. Add rules first.</span>
+                        ) : (
+                            allPossibleTopics.map(topic => {
+                                const isSelected = selectedTopicsForFolder.includes(topic);
+                                return (
+                                    <button 
+                                        key={topic}
+                                        onClick={() => {
+                                            if(isSelected) setSelectedTopicsForFolder(selectedTopicsForFolder.filter(t => t !== topic));
+                                            else setSelectedTopicsForFolder([...selectedTopicsForFolder, topic]);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${isSelected ? 'bg-blue-600 text-white border-blue-500' : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}
+                                    >
+                                        {topic}
+                                    </button>
+                                );
+                            })
+                        )}
+                    </div>
+                    <p className="text-[9px] text-slate-400 px-1 font-medium italic">If no topics are selected, all questions in the subject will be included.</p>
+                  </div>
+
                   <div className="flex items-center gap-5 p-6 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 cursor-pointer" onClick={() => setFilterUncategorized(!filterUncategorized)}>
                       <input type="checkbox" checked={filterUncategorized} onChange={e => setFilterUncategorized(e.target.checked)} className="w-6 h-6 rounded accent-blue-600" />
                       <div>
                           <label className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Uncategorized Filter</label>
-                          <p className="text-[10px] text-slate-400 font-bold">Only show questions with 0 applied tags</p>
+                          <p className="text-[10px] text-slate-400 font-bold">Override topics: Only show questions with 0 applied tags</p>
                       </div>
                   </div>
                 </div>
                 <div className="flex gap-4 mt-12">
                    <button onClick={() => setShowFolderModal(false)} className="flex-1 py-5 text-slate-500 font-black uppercase tracking-widest text-xs hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-all">Cancel</button>
-                   <button onClick={handleSaveFolder} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-600/20 hover:bg-blue-500 transition-all">Create Folder</button>
+                   <button onClick={handleSaveFolder} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-600/20 hover:bg-blue-500 transition-all">Save Folder</button>
                 </div>
              </div>
           </div>
