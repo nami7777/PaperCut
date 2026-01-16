@@ -38,8 +38,9 @@ const Export: React.FC = () => {
 
   /**
    * Helper to compress raw base64 PNGs into optimized JPEGs to reduce export size.
+   * Quality updated to 0.8 per user request for better resolution.
    */
-  const compressImage = (src: string, quality = 0.6): Promise<string> => {
+  const compressImage = (src: string, quality = 0.8): Promise<string> => {
     return new Promise((resolve) => {
         if (!src) return resolve("");
         const img = new Image();
@@ -112,17 +113,16 @@ const Export: React.FC = () => {
       const rawQuestions = await getQuestions();
       const processedQuestions = [];
 
-      // Compress all images in the questions for HTML to save space
       for (const q of rawQuestions) {
           const processedParts = [];
           for (const p of q.parts) {
               const qImgs = [];
               const aImgs = [];
               for (const img of (p.questionImages || (p.questionImage ? [p.questionImage] : []))) {
-                  qImgs.push(await compressImage(img, 0.5));
+                  qImgs.push(await compressImage(img, 0.8));
               }
               for (const img of (p.answerImages || (p.answerImage ? [p.answerImage] : []))) {
-                  aImgs.push(await compressImage(img, 0.5));
+                  aImgs.push(await compressImage(img, 0.8));
               }
               processedParts.push({ ...p, questionImages: qImgs, answerImages: aImgs });
           }
@@ -156,6 +156,13 @@ const Export: React.FC = () => {
         <main id="content" class="flex-1 overflow-y-auto bg-slate-900"></main>
     </div>
 
+    <!-- Zoom Overlay -->
+    <div id="zoom-overlay" class="fixed inset-0 bg-black/95 z-[100] hidden flex-col items-center justify-center animate-up cursor-zoom-out" onclick="closeZoom()">
+        <button class="absolute top-8 right-8 text-white/50 hover:text-white p-3 bg-white/10 rounded-full transition-all">✕</button>
+        <div class="p-4 text-white/30 text-[10px] font-black uppercase tracking-[0.2em] absolute top-8 left-8 bg-black/50 rounded-full border border-white/5">Click outside or press ESC to close</div>
+        <img id="zoom-img" class="max-w-[92%] max-h-[92%] object-contain shadow-2xl rounded-2xl border border-white/10" onclick="event.stopPropagation()">
+    </div>
+
     <script id="questions-data" type="application/json">${JSON.stringify(processedQuestions)}</script>
 
     <script>
@@ -164,11 +171,36 @@ const Export: React.FC = () => {
         let currentPracticeIndex = 0;
         const revealedSets = new Set();
         const selectedForPdf = new Set();
+        const userMcqChoices = {}; // Store { 'practiceIndex_partIndex': 'A' }
 
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('nav button').forEach(b => b.classList.remove('tab-active', 'text-slate-500'));
             document.getElementById('tab-' + tab).classList.add('tab-active');
+            render();
+        }
+
+        function zoomImage(src) {
+            const overlay = document.getElementById('zoom-overlay');
+            const img = document.getElementById('zoom-img');
+            img.src = src;
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeZoom() {
+            const overlay = document.getElementById('zoom-overlay');
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+            document.body.style.overflow = 'auto';
+        }
+
+        document.addEventListener('keydown', e => { if(e.key === 'Escape') closeZoom(); });
+
+        function handleMcqChoice(qIdx, pIdx, choice) {
+            userMcqChoices[qIdx + '_' + pIdx] = choice;
+            revealedSets.add(qIdx + '_' + pIdx);
             render();
         }
 
@@ -183,18 +215,25 @@ const Export: React.FC = () => {
             const q = questions[currentPracticeIndex];
             if (!q) { container.innerHTML = '<div class="flex items-center justify-center h-full text-slate-500 font-bold">No questions matching selection.</div>'; return; }
             
+            const isPaper1 = q.paperType.toLowerCase().includes('paper 1');
+
             const div = document.createElement('div');
-            div.className = 'max-w-4xl mx-auto p-6 md:p-10 space-y-10 pb-40 animate-up';
+            div.className = 'max-w-4xl mx-auto p-6 md:p-10 space-y-10 pb-64 animate-up';
             div.innerHTML = \`
                 <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl flex justify-between items-center">
                     <div>
                         <div class="text-blue-400 font-black text-xl mb-1 uppercase tracking-tighter">\${q.year} \${q.month} • \${q.paperType}</div>
                         <div class="flex flex-wrap gap-2 mt-2">\${q.topics.map(t => \`<span class="text-[10px] bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full border border-blue-500/20 font-black uppercase tracking-wider">\${t}</span>\`).join('')}</div>
                     </div>
-                    <div class="text-right text-slate-500 font-mono text-sm tracking-widest">PROG: \${currentPracticeIndex + 1}/\${questions.length}</div>
+                    <div class="text-right text-slate-500 font-mono text-sm tracking-widest">Q\${q.questionNumber} • \${currentPracticeIndex + 1}/\${questions.length}</div>
                 </div>
 
-                \${q.parts.map((p, idx) => \`
+                \${q.parts.map((p, pIdx) => {
+                    const id = currentPracticeIndex + '_' + pIdx;
+                    const isRevealed = revealedSets.has(id);
+                    const choice = userMcqChoices[id];
+
+                    return \`
                     <div class="bg-slate-800 p-8 md:p-12 rounded-[2.5rem] border border-slate-700 shadow-2xl space-y-8">
                         <div class="flex items-center gap-4 mb-4">
                             <span class="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-lg">\${p.label === 'i' ? (currentPracticeIndex+1) : p.label}</span>
@@ -202,30 +241,47 @@ const Export: React.FC = () => {
                         </div>
                         
                         <div class="space-y-6">
-                            \${p.questionImages.map(img => \`<img src="\${img}" class="w-full rounded-2xl bg-white p-4 shadow-xl border border-slate-700" />\`).join('')}
+                            \${p.questionImages.map(img => \`<img src="\${img}" onclick="zoomImage('\${img}')" class="w-full rounded-2xl bg-white p-4 shadow-xl border border-slate-700 cursor-zoom-in hover:brightness-95 transition-all" />\`).join('')}
                         </div>
 
+                        \${isPaper1 && p.answerText ? \`
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
+                                \${['A', 'B', 'C', 'D'].map(opt => {
+                                    const isCorrect = opt === p.answerText;
+                                    const isSelected = choice === opt;
+                                    let btnClass = "py-6 rounded-2xl font-black text-2xl border-2 transition-all flex items-center justify-center ";
+                                    if (!choice) btnClass += "bg-slate-700 border-slate-600 hover:border-blue-500 text-slate-200 active:scale-95";
+                                    else if (isCorrect) btnClass += "bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]";
+                                    else if (isSelected) btnClass += "bg-red-500/20 border-red-500 text-red-400";
+                                    else btnClass += "bg-slate-800 border-slate-700 text-slate-600 opacity-40";
+
+                                    return \`<button onclick="handleMcqChoice(\${currentPracticeIndex}, \${pIdx}, '\${opt}')" \${choice ? 'disabled' : ''} class="\${btnClass}">\${opt}</button>\`;
+                                }).join('')}
+                            </div>
+                        \` : ''}
+
                         <div class="pt-6">
-                            \${!revealedSets.has(currentPracticeIndex + '_' + idx) ? 
-                                \`<button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="w-full py-6 bg-slate-700 hover:bg-blue-600 rounded-2xl font-black text-lg transition-all border border-slate-600 shadow-lg">REVEAL SOLUTION</button>\` :
+                            \${!isRevealed ? 
+                                \`<button onclick="togglePart('\${id}')" class="w-full py-6 bg-slate-700 hover:bg-blue-600 rounded-2xl font-black text-lg transition-all border border-slate-600 shadow-lg">REVEAL SOLUTION</button>\` :
                                 \`<div class="bg-slate-900 p-10 rounded-3xl border-2 border-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.1)] animate-up">
                                     <div class="flex justify-between items-center mb-6">
                                         <span class="text-xs text-emerald-500 font-black uppercase tracking-widest">Solution Key</span>
-                                        <button onclick="togglePart('\${currentPracticeIndex + '_' + idx}')" class="text-slate-500 text-xs font-bold hover:text-white transition-colors">HIDE</button>
+                                        <button onclick="togglePart('\${id}')" class="text-slate-500 text-xs font-bold hover:text-white transition-colors">HIDE</button>
                                     </div>
-                                    \${p.answerText ? \`<div class="text-6xl font-black mb-8 text-emerald-400">\${p.answerText}</div>\` : ''}
+                                    \${p.answerText ? \`<div class="text-7xl font-black mb-8 text-emerald-400 text-center uppercase tracking-tighter">\${p.answerText}</div>\` : ''}
                                     <div class="space-y-6">
-                                        \${p.answerImages.map(img => \`<img src="\${img}" class="w-full rounded-2xl bg-white p-4 shadow-xl border border-slate-700" />\`).join('')}
+                                        \${p.answerImages.map(img => \`<img src="\${img}" onclick="zoomImage('\${img}')" class="w-full rounded-2xl bg-white p-4 shadow-xl border border-slate-700 cursor-zoom-in hover:brightness-95 transition-all" />\`).join('')}
                                     </div>
                                 </div>\`
                             }
                         </div>
                     </div>
-                \`).join('')}
+                    \`;
+                }).join('')}
 
-                <div class="fixed bottom-0 left-0 right-0 p-8 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 flex justify-center gap-6 z-50">
-                    <button onclick="move(-1)" class="px-10 py-5 bg-slate-800 hover:bg-slate-700 rounded-2xl font-black transition-all border border-slate-700">PREV</button>
-                    <button onclick="move(1)" class="px-12 py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black shadow-2xl shadow-blue-600/30 transition-all">NEXT QUESTION</button>
+                <div class="fixed bottom-0 left-0 right-0 p-8 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 flex justify-center items-center gap-6 z-50">
+                    <button onclick="move(-1)" class="px-10 py-5 bg-slate-800 hover:bg-slate-700 rounded-2xl font-black transition-all border border-slate-700 flex items-center justify-center">PREV</button>
+                    <button onclick="move(1)" class="px-12 py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black shadow-2xl shadow-blue-600/30 transition-all flex items-center justify-center">NEXT QUESTION</button>
                 </div>
             \`;
             container.appendChild(div);
@@ -365,7 +421,7 @@ const Export: React.FC = () => {
                     for (const p of q.parts) {
                         const qImgs = p.questionImages || (p.questionImage ? [p.questionImage] : []);
                         for (const img of qImgs) {
-                            const compressed = await compressImage(img, 0.5);
+                            const compressed = await compressImage(img, 0.8);
                             const dims = await getImageDims(compressed);
                             const h = (dims.h * maxW) / dims.w;
                             if (y + h > 280) { doc.addPage(); y = 20; }
@@ -385,7 +441,7 @@ const Export: React.FC = () => {
                             y += 6;
                             const aImgs = p.answerImages || (p.answerImage ? [p.answerImage] : []);
                             for (const img of aImgs) {
-                                const compressed = await compressImage(img, 0.5);
+                                const compressed = await compressImage(img, 0.8);
                                 const dims = await getImageDims(compressed);
                                 const h = (dims.h * maxW) / dims.w;
                                 if (y + h > 280) { doc.addPage(); y = 20; }
@@ -433,7 +489,7 @@ const Export: React.FC = () => {
                     for (const p of q.parts) {
                         const qImgs = p.questionImages || (p.questionImage ? [p.questionImage] : []);
                         for (const img of qImgs) {
-                            const compressed = await compressImage(img, 0.5);
+                            const compressed = await compressImage(img, 0.8);
                             const dims = await getImageDims(compressed);
                             const base64 = compressed.split(',')[1];
                             children.push(new Paragraph({
@@ -447,7 +503,7 @@ const Export: React.FC = () => {
                             children.push(new Paragraph({ children: [new TextRun({ text: "ANSWER:", bold: true })] }));
                             const aImgs = p.answerImages || (p.answerImage ? [p.answerImage] : []);
                             for (const img of aImgs) {
-                                const compressed = await compressImage(img, 0.5);
+                                const compressed = await compressImage(img, 0.8);
                                 const dims = await getImageDims(compressed);
                                 const base64 = compressed.split(',')[1];
                                 children.push(new Paragraph({
