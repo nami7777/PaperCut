@@ -344,7 +344,7 @@ const Export: React.FC = () => {
                 if(y > 250) { doc.addPage(); y = 20; }
                 doc.setFontSize(14);
                 doc.setTextColor(50, 50, 50);
-                doc.text(\`\${q.year} \${q.month} - Q\${q.questionNumber} (\${q.topics.join(', ')})\`, margin, y);
+                doc.text(\`\${q.year} \${q.month} - Q\${q.questionNumber} (Lessons: \${q.topics.join(', ')})\`, margin, y);
                 y += 10;
                 for(const p of q.parts) {
                     for(const img of p.questionImages) {
@@ -414,8 +414,8 @@ const Export: React.FC = () => {
                     if (y > 270) { doc.addPage(); y = 20; }
                     doc.setFontSize(12);
                     doc.setTextColor(0, 0, 0);
-                    const topicStr = q.topics.length > 0 ? ` [Topics: ${q.topics.join(', ')}]` : '';
-                    doc.text(`Question ${q.questionNumber}${topicStr}`, margin, y);
+                    const lessonStr = q.topics.length > 0 ? ` [Lessons: ${q.topics.join(', ')}]` : '';
+                    doc.text(`Question ${q.questionNumber}${lessonStr}`, margin, y);
                     y += 10;
 
                     for (const p of q.parts) {
@@ -481,7 +481,7 @@ const Export: React.FC = () => {
             for (const dateKey of Object.keys(grouped[paperType])) {
                 children.push(new Paragraph({ text: dateKey, heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 200 } }));
                 for (const q of grouped[paperType][dateKey]) {
-                    const topicStr = q.topics.length > 0 ? ` (Topics: ${q.topics.join(', ')})` : '';
+                    const topicStr = q.topics.length > 0 ? ` (Lessons: ${q.topics.join(', ')})` : '';
                     children.push(new Paragraph({
                         children: [new TextRun({ text: `Question ${q.questionNumber}${topicStr}`, bold: true, size: 28 })],
                         spacing: { before: 200 }
@@ -560,7 +560,7 @@ const Export: React.FC = () => {
                {exportScope === 'folders' && (
                    <div className="grid grid-cols-2 gap-2">
                        {availableFolders.map(f => (
-                           <div key={f.id} onClick={() => toggleFolder(f.id)} className={`flex items-center gap-2 p-3 rounded-xl cursor-pointer border transition-all ${selectedFolderIds.has(f.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-600' : 'bg-white dark:bg-slate-800'}`}>
+                           <div key={f.id} onClick={() => toggleFolder(f.id)} className={`flex items-center gap-2 p-3 rounded-xl cursor-pointer border transition-all ${selectedFolderIds.has(f.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-600' : 'bg-white dark:bg-slate-800 border'}`}>
                                <CheckSquare size={18} className={selectedFolderIds.has(f.id) ? "text-blue-500" : "text-slate-300"}/> <span className="text-xs font-bold truncate">{f.name}</span>
                            </div>
                        ))}
