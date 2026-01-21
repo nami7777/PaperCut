@@ -1,7 +1,7 @@
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Folder, QuestionEntry, Lesson } from '../types';
+import { Folder, QuestionEntry, Lesson, PaperType, Month, QuestionPart } from '../types';
 import { 
   getQuestionsBySubject, 
   getFoldersBySubject, 
@@ -14,7 +14,8 @@ import {
   saveLesson,
   deleteLesson,
   reprocessSubjectMapping,
-  updateQuestionMetadata
+  updateQuestionMetadata,
+  saveQuestion
 } from '../services/db';
 import { extractTriggersLocally, simulateNlpProcessing, MagicAnalysisResult } from '../services/nlp';
 import { 
@@ -22,7 +23,7 @@ import {
   Trash2, Play, Download, Edit2, 
   Check, X, Zap, Info,
   Filter, Target, AlertCircle, RefreshCw,
-  ChevronUp, ChevronDown, FileQuestion, ScanText, Tag
+  ChevronUp, ChevronDown, FileQuestion, ScanText, Tag, Image as ImageIcon, Clipboard, HelpCircle
 } from 'lucide-react';
 
 const SubjectDashboard: React.FC = () => {
@@ -39,8 +40,9 @@ const SubjectDashboard: React.FC = () => {
   
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [showLessonModal, setShowLessonModal] = useState(false);
-  const [viewingFolder, setViewingFolder] = useState<Folder | null>(null);
-  
+  const [showMagicModal, setShowMagicModal] = useState(false);
+  const [showSingleQuestionModal, setShowSingleQuestionModal] = useState(false);
+
   const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
 
@@ -55,7 +57,6 @@ const SubjectDashboard: React.FC = () => {
   const [phraseInput, setPhraseInput] = useState("");
   const [lessonTranscript, setLessonTranscript] = useState("");
 
-  const [showMagicModal, setShowMagicModal] = useState(false);
   const [isMagicRunning, setIsMagicRunning] = useState(false);
   const [magicLessonId, setMagicLessonId] = useState("");
   const [magicResult, setMagicResult] = useState<MagicAnalysisResult | null>(null);
@@ -63,6 +64,17 @@ const SubjectDashboard: React.FC = () => {
   const [availableKeywords, setAvailableKeywords] = useState<string[]>([]);
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+
+  // --- Single Question Form State ---
+  const [sqYear, setSqYear] = useState<number>(new Date().getFullYear());
+  const [sqMonth, setSqMonth] = useState<Month>(Month.MAY);
+  const [sqPaperType, setSqPaperType] = useState<PaperType>(PaperType.PAPER_1);
+  const [sqNumber, setSqNumber] = useState<string>("");
+  const [sqTopics, setSqTopics] = useState<string[]>([]);
+  const [sqQImages, setSqQImages] = useState<string[]>([]);
+  const [sqAImages, setSqAImages] = useState<string[]>([]);
+  const [sqAnswerText, setSqAnswerText] = useState<string>("");
+  const [isSqSaving, setIsSqSaving] = useState(false);
 
   useEffect(() => {
     if (!subject) { navigate('/'); return; }
@@ -79,6 +91,14 @@ const SubjectDashboard: React.FC = () => {
     setQuestions(qs);
     setFolders(fs);
     setLessons(ls);
+    
+    // Auto-set next question number if empty
+    if (qs.length > 0 && !sqNumber) {
+        const lastNum = parseInt(qs[0].questionNumber);
+        if (!isNaN(lastNum)) setSqNumber((lastNum + 1).toString());
+    } else if (!sqNumber) {
+        setSqNumber("1");
+    }
   };
 
   const loadMetadata = async () => {
@@ -108,6 +128,88 @@ const SubjectDashboard: React.FC = () => {
       }
   };
 
+  // --- Single Question Logic ---
+  const openSingleQuestionModal = () => {
+      setSqQImages([]);
+      setSqAImages([]);
+      setSqTopics([]);
+      setSqAnswerText("");
+      // Reset number based on existing questions
+      if (questions.length > 0) {
+          const nums = questions.map(q => parseInt(q.questionNumber)).filter(n => !isNaN(n));
+          const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
+          setSqNumber((maxNum + 1).toString());
+      } else {
+          setSqNumber("1");
+      }
+      setShowSingleQuestionModal(true);
+  };
+
+  const handleSqPaste = useCallback((e: React.ClipboardEvent, type: 'Q' | 'A') => {
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+              const blob = items[i].getAsFile();
+              if (blob) {
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                      const dataUrl = event.target?.result as string;
+                      if (type === 'Q') setSqQImages(prev => [...prev, dataUrl]);
+                      else setSqAImages(prev => [...prev, dataUrl]);
+                  };
+                  reader.readAsDataURL(blob);
+              }
+          }
+      }
+  }, []);
+
+  const handleSaveSingleQuestion = async () => {
+      if (!sqNumber || sqQImages.length === 0) {
+          alert("Please provide at least a question number and an image.");
+          return;
+      }
+      if (sqPaperType === PaperType.PAPER_1 && !sqAnswerText) {
+          alert("Please provide an answer (A, B, C, or D) for Paper 1 questions.");
+          return;
+      }
+
+      setIsSqSaving(true);
+      const parts: QuestionPart[] = [{
+          id: Date.now().toString(),
+          label: sqPaperType === PaperType.PAPER_1 ? 'i' : 'Q',
+          questionImages: sqQImages,
+          answerImages: sqAImages,
+          answerText: sqAnswerText
+      }];
+
+      const entry: QuestionEntry = {
+          id: Date.now().toString(),
+          createdAt: Date.now(),
+          keywords: [],
+          topics: sqTopics,
+          year: sqYear,
+          month: sqMonth,
+          subject: subject,
+          paperType: sqPaperType,
+          questionNumber: sqNumber,
+          parts,
+          userStatus: 'None'
+      };
+
+      try {
+          await saveQuestion(entry);
+          setShowSingleQuestionModal(false);
+          await loadData();
+          await loadMetadata();
+      } catch (e) {
+          console.error(e);
+          alert("Failed to save question.");
+      } finally {
+          setIsSqSaving(false);
+      }
+  };
+
+  // --- Existing Logic ---
   const openNewLesson = () => {
     setEditingLessonId(null);
     setLessonName("");
@@ -186,7 +288,7 @@ const SubjectDashboard: React.FC = () => {
     }
     
     await updateQuestionMetadata(qId, { topics: newTopics });
-    loadData(); // Refresh local list
+    loadData();
   };
 
   const handleMagicAnalyze = async () => {
@@ -256,9 +358,9 @@ const SubjectDashboard: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-2">
-             <button onClick={() => setShowMagicModal(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all shadow-lg border border-indigo-400"><Zap size={16} /> Magic Rules</button>
-             <button onClick={() => navigate('/export', { state: { subject } })} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors"><Download size={16} /> Export</button>
-             <button onClick={() => navigate('/new', { state: { subject } })} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-md"><Plus size={16} /> Log Exam</button>
+             <button onClick={() => setShowMagicModal(true)} className="hidden md:flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all shadow-lg border border-indigo-400"><Zap size={16} /> Magic Rules</button>
+             <button onClick={openSingleQuestionModal} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors shadow-md border border-emerald-500/30"><Plus size={16} /> Add Single Question</button>
+             <button onClick={() => navigate('/new', { state: { subject } })} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-md"><FileQuestion size={16} /> Log Exam</button>
           </div>
         </div>
       </div>
@@ -479,6 +581,146 @@ const SubjectDashboard: React.FC = () => {
          )}
       </div>
 
+      {/* --- Single Question Modal --- */}
+      {showSingleQuestionModal && (
+          <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+            <div className="bg-white dark:bg-slate-800 w-full max-w-4xl rounded-[2.5rem] p-10 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700 shadow-2xl animate-slide-up">
+              <div className="flex justify-between items-center mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-emerald-600 text-white rounded-2xl"><Plus size={24}/></div>
+                  <h2 className="text-2xl font-black tracking-tighter uppercase">Add Single Question</h2>
+                </div>
+                <button onClick={() => setShowSingleQuestionModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X size={24}/></button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                {/* Left Column: Metadata */}
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Year</label>
+                            <input type="number" value={sqYear} onChange={e => setSqYear(parseInt(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Month</label>
+                            <select value={sqMonth} onChange={e => setSqMonth(e.target.value as Month)} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold">
+                                <option value={Month.MAY}>May</option>
+                                <option value={Month.NOVEMBER}>November</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Paper Type</label>
+                            <select value={sqPaperType} onChange={e => setSqPaperType(e.target.value as PaperType)} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold">
+                                <option value={PaperType.PAPER_1}>Paper 1 (MCQ)</option>
+                                <option value={PaperType.PAPER_2}>Paper 2 / 1-b</option>
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Question Number</label>
+                            <input type="text" value={sqNumber} onChange={e => setSqNumber(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-900 p-4 rounded-xl border-none outline-none font-bold text-blue-500" placeholder="e.g. 1" />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Tag Topics</label>
+                        <div className="flex flex-wrap gap-2 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 max-h-40 overflow-y-auto">
+                            {allPossibleTopics.map(t => {
+                                const active = sqTopics.includes(t);
+                                return (
+                                    <button key={t} onClick={() => setSqTopics(active ? sqTopics.filter(x => x !== t) : [...sqTopics, t])} className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-all ${active ? 'bg-blue-600 text-white border-blue-500' : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}>
+                                        {t}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {sqPaperType === PaperType.PAPER_1 && (
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Paper 1 Answer (MCQ)</label>
+                            <div className="grid grid-cols-4 gap-2">
+                                {['A', 'B', 'C', 'D'].map(opt => (
+                                    <button key={opt} onClick={() => setSqAnswerText(opt)} className={`p-4 rounded-xl font-black text-xl border-2 transition-all ${sqAnswerText === opt ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-100 dark:bg-slate-900 border-transparent text-slate-400'}`}>
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Right Column: Images */}
+                <div className="space-y-8">
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14}/> Question Images</label>
+                            <span className="text-[9px] text-blue-500 font-bold flex items-center gap-1"><Clipboard size={10}/> Paste [Ctrl+V] below</span>
+                        </div>
+                        <div 
+                            tabIndex={0} 
+                            onPaste={(e) => handleSqPaste(e, 'Q')}
+                            className="min-h-[140px] bg-slate-100 dark:bg-slate-900 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 p-4 outline-none focus:border-blue-500 transition-all cursor-text group"
+                        >
+                            {sqQImages.length === 0 && (
+                                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-xs gap-2 group-focus:text-blue-500 transition-colors">
+                                    <ImageIcon size={32} strokeWidth={1}/>
+                                    <p>Click here & paste question image</p>
+                                </div>
+                            )}
+                            {sqQImages.map((img, i) => (
+                                <div key={i} className="relative w-20 h-20 group/img">
+                                    <img src={img} className="w-full h-full object-cover rounded-lg shadow-sm border border-slate-200" />
+                                    <button onClick={() => setSqQImages(sqQImages.filter((_, idx) => idx !== i))} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover/img:opacity-100 transition-opacity"><X size={10}/></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14}/> Answer Images (Optional)</label>
+                            <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-1"><Clipboard size={10}/> Paste [Ctrl+V] below</span>
+                        </div>
+                        <div 
+                            tabIndex={0} 
+                            onPaste={(e) => handleSqPaste(e, 'A')}
+                            className="min-h-[140px] bg-slate-100 dark:bg-slate-900 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 p-4 outline-none focus:border-emerald-500 transition-all cursor-text group"
+                        >
+                            {sqAImages.length === 0 && (
+                                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-xs gap-2 group-focus:text-emerald-500 transition-colors">
+                                    <ImageIcon size={32} strokeWidth={1}/>
+                                    <p>Click here & paste answer image</p>
+                                </div>
+                            )}
+                            {sqAImages.map((img, i) => (
+                                <div key={i} className="relative w-20 h-20 group/img">
+                                    <img src={img} className="w-full h-full object-cover rounded-lg shadow-sm border border-slate-200" />
+                                    <button onClick={() => setSqAImages(sqAImages.filter((_, idx) => idx !== i))} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover/img:opacity-100 transition-opacity"><X size={10}/></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-12">
+                 <button onClick={() => setShowSingleQuestionModal(false)} className="flex-1 py-5 text-slate-500 font-black uppercase tracking-widest text-xs hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-all">Cancel</button>
+                 <button 
+                    onClick={handleSaveSingleQuestion} 
+                    disabled={isSqSaving}
+                    className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
+                 >
+                    {isSqSaving ? <RefreshCw className="animate-spin" size={18}/> : <Database size={18}/>}
+                    Add to Repository
+                 </button>
+              </div>
+            </div>
+          </div>
+      )}
+
       {/* Lesson Modal */}
       {showLessonModal && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-md">
@@ -578,7 +820,7 @@ const SubjectDashboard: React.FC = () => {
           </div>
       )}
 
-      {/* Smart Folder Modal (NOW WITH TOPIC FILTERING) */}
+      {/* Smart Folder Modal */}
       {showFolderModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
              <div className="bg-white dark:bg-slate-800 w-full max-w-xl rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-auto max-h-[90vh]">
