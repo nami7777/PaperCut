@@ -359,6 +359,7 @@ const SubjectDashboard: React.FC = () => {
           </div>
           <div className="flex gap-2">
              <button onClick={() => setShowMagicModal(true)} className="hidden md:flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all shadow-lg border border-indigo-400"><Zap size={16} /> Magic Rules</button>
+             <button onClick={() => navigate('/export', { state: { subject } })} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors shadow-md border border-amber-500/30"><Download size={16} /> Export</button>
              <button onClick={openSingleQuestionModal} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors shadow-md border border-emerald-500/30"><Plus size={16} /> Add Single Question</button>
              <button onClick={() => navigate('/new', { state: { subject } })} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-md"><FileQuestion size={16} /> Log Exam</button>
           </div>
