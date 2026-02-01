@@ -9,6 +9,12 @@ export enum PaperType {
   PAPER_2 = 'Paper 2/1-b' // Covers Paper 2, 1-b, 3 etc.
 }
 
+export interface PdfPair {
+  id: string;
+  questionPdf: File;
+  answerPdf: File;
+}
+
 export interface ExamMetadata {
   id: string;
   subject: string;
@@ -16,8 +22,9 @@ export interface ExamMetadata {
   month: Month;
   timezone?: string;
   paperType: PaperType;
-  questionPdf?: File; // Only used during session
-  answerPdf?: File;   // Only used during session
+  questionPdf?: File; // For backward compatibility
+  answerPdf?: File;   // For backward compatibility
+  pdfPairs?: PdfPair[]; 
 }
 
 export interface QuestionPart {

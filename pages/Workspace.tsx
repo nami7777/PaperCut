@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ExamMetadata, PaperType, QuestionPart, QuestionEntry } from '../types';
+import { ExamMetadata, PaperType, QuestionPart, QuestionEntry, PdfPair } from '../types';
 import PdfSnipper from '../components/PdfSnipper';
-import { Save, Plus, Trash2, ChevronLeft, Layers, FileQuestion, AlertCircle, Loader2, LogOut, Minus, Anchor, X, ScanText, Sparkles, Wand2 } from 'lucide-react';
+import { Save, Plus, Trash2, ChevronLeft, Layers, FileQuestion, AlertCircle, Loader2, LogOut, Minus, Anchor, X, ScanText, Sparkles, Wand2, Boxes } from 'lucide-react';
 import { saveQuestion, getAllUniqueKeywords, getAllUniqueTopics, getFewShotExamples } from '../services/db';
 import { generateAiKeywords } from '../services/gemini';
 
@@ -19,6 +19,7 @@ const Workspace: React.FC = () => {
   const metadata = location.state as ExamMetadata;
 
   const [activeTab, setActiveTab] = useState<'question' | 'answer'>('question');
+  const [activePairIndex, setActivePairIndex] = useState(0);
   
   // Draft State
   const [questionNum, setQuestionNum] = useState<string>("1");
@@ -70,6 +71,11 @@ const Workspace: React.FC = () => {
   if (!metadata) return null;
 
   const isPaper1 = metadata.paperType === PaperType.PAPER_1;
+  const currentPair: PdfPair | null = metadata.pdfPairs ? metadata.pdfPairs[activePairIndex] : (metadata.questionPdf && metadata.answerPdf ? {
+      id: 'legacy',
+      questionPdf: metadata.questionPdf,
+      answerPdf: metadata.answerPdf
+  } : null);
 
   // OCR Helper
   const runOcr = async (imageSrc: string) => {
@@ -158,8 +164,6 @@ const Workspace: React.FC = () => {
   const removeStagedImage = (type: 'Q' | 'A', index: number) => {
       if (type === 'Q') {
           setStagedQImages(prev => prev.filter((_, i) => i !== index));
-          // Note: We don't easily remove the OCR text corresponding to this image 
-          // because we just concatenated it. For MVP this is acceptable.
       }
       else setStagedAImages(prev => prev.filter((_, i) => i !== index));
   };
@@ -515,7 +519,6 @@ const Workspace: React.FC = () => {
                 </div>
             )}
 
-            {/* Active Keywords */}
             <div className="flex flex-wrap gap-1 mt-2">
               {keywords.map((k, i) => (
                 <span key={i} className="bg-slate-700 text-slate-200 text-xs px-2 py-1 rounded flex items-center gap-1">
@@ -525,7 +528,6 @@ const Workspace: React.FC = () => {
               ))}
             </div>
 
-            {/* AI Suggestions */}
             {smartSuggestions.length > 0 && (
                 <div className="mt-3 animate-fade-in bg-slate-800/50 p-2 rounded border border-slate-700/50">
                     <p className="text-[10px] uppercase font-bold text-slate-500 mb-2 flex items-center gap-1">
@@ -544,10 +546,9 @@ const Workspace: React.FC = () => {
                     </div>
                 </div>
             )}
-             {/* AI Loading State */}
              {isAiGenerating && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-purple-400 animate-pulse">
-                    <Sparkles size={12} /> Gemini is analyzing text & learning your style...
+                    <Sparkles size={12} /> Gemini is analyzing text...
                 </div>
              )}
           </div>
@@ -566,8 +567,26 @@ const Workspace: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full">
-        <div className="flex bg-slate-800 border-b border-slate-700">
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Batch Switcher */}
+        {metadata.pdfPairs && metadata.pdfPairs.length > 1 && (
+            <div className="bg-slate-800 border-b border-slate-700 p-2 flex items-center gap-2 overflow-x-auto shrink-0 scrollbar-hide">
+                <div className="flex items-center gap-2 px-3 text-slate-500">
+                    <Boxes size={16} /> <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Batches</span>
+                </div>
+                {metadata.pdfPairs.map((p, idx) => (
+                    <button
+                        key={p.id}
+                        onClick={() => setActivePairIndex(idx)}
+                        className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border whitespace-nowrap ${activePairIndex === idx ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600'}`}
+                    >
+                        Batch {idx + 1}
+                    </button>
+                ))}
+            </div>
+        )}
+
+        <div className="flex bg-slate-800 border-b border-slate-700 shrink-0">
           <button 
             onClick={() => setActiveTab('question')}
             className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === 'question' ? 'bg-slate-700 text-blue-400 border-b-2 border-blue-500' : 'text-slate-400 hover:bg-slate-800/50'}`}
@@ -584,13 +603,13 @@ const Workspace: React.FC = () => {
 
         <div className="flex-1 relative overflow-hidden bg-slate-900">
            <div className={`absolute inset-0 ${activeTab === 'question' ? 'z-10' : 'z-0 invisible'}`}>
-              {metadata.questionPdf && (
-                <PdfSnipper file={metadata.questionPdf} onSnip={handleSnip} label="Question Document" />
+              {currentPair && (
+                <PdfSnipper key={`q-${currentPair.id}`} file={currentPair.questionPdf} onSnip={handleSnip} label={`Batch ${activePairIndex + 1} - Question`} />
               )}
            </div>
            <div className={`absolute inset-0 ${activeTab === 'answer' ? 'z-10' : 'z-0 invisible'}`}>
-              {metadata.answerPdf && (
-                <PdfSnipper file={metadata.answerPdf} onSnip={handleSnip} label="Answer Key Document" />
+              {currentPair && (
+                <PdfSnipper key={`a-${currentPair.id}`} file={currentPair.answerPdf} onSnip={handleSnip} label={`Batch ${activePairIndex + 1} - Answer`} />
               )}
            </div>
         </div>
